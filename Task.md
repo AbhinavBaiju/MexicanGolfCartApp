@@ -106,9 +106,9 @@ Build a Shopify app + theme integration that:
 
 ## M5 — Storefront Widget (Theme App Extension)
 - [x] Create theme app extension
-- [/] App block schema:
+- [x] App block schema:
   - [x] Settings: default location, UI labels, style options
-- [/] Frontend widget:
+- [x] Frontend widget:
   - [x] Date picker (range)
   - [x] Location dropdown
   - [x] Quantity selector

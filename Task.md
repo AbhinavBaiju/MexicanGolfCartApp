@@ -42,7 +42,7 @@ Build a Shopify app + theme integration that:
 - [/] Add CI: lint, typecheck, tests, deploy preview
 
 ## M1 — Shopify App Setup
-- [/] Create Shopify app (CLI) and configure:
+- [x] Create Shopify app (CLI) and configure:
   - [x] App Proxy path + prefix
   - [x] Required scopes: read_products, read_orders, write_orders (if auto-cancel), read_themes (if needed), etc.
   - [x] Webhook subscriptions: orders/create (+ optional orders/cancelled, orders/updated)
@@ -121,19 +121,19 @@ Build a Shopify app + theme integration that:
   - [x] If hold expires, prompt to re-check availability
 
 ## M6 — Order Webhook (Confirm / Enforce)
-- [ ] POST /webhooks/orders_create
-  - [ ] Verify HMAC
-  - [ ] Idempotency using event id header
-  - [ ] Parse line items and extract booking_token + required properties
-  - [ ] Validate:
-    - [ ] Booking exists, not expired, matches shop
+- [/] POST /webhooks/orders_create
+  - [x] Verify HMAC
+  - [x] Idempotency using event id header
+  - [x] Parse line items and extract booking_token + required properties
+  - [/] Validate:
+    - [x] Booking exists, not expired, matches shop
     - [ ] Dates/location match booking
-    - [ ] Deposit line item present (matching token and quantity)
-    - [ ] Capacity reserved (booking_days exists)
-  - [ ] Confirm booking:
-    - [ ] Mark booking CONFIRMED
-    - [ ] Attach order_id
-    - [ ] Extend reservation: keep reserved_qty
+    - [x] Deposit line item present (matching token and quantity)
+    - [/] Capacity reserved (booking_days exists) (Implicit in booking status check?)
+  - [x] Confirm booking:
+    - [x] Mark booking CONFIRMED
+    - [x] Attach order_id
+    - [x] Extend reservation: keep reserved_qty
   - [ ] Reject invalid orders:
     - [ ] If permitted: cancel order via Admin API
     - [ ] Otherwise: mark booking INVALID and alert in Admin UI

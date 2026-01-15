@@ -1,3 +1,4 @@
+import { confirmBookingsFromOrder } from './bookingService';
 import { Env } from './types';
 
 export async function handleWebhook(request: Request, env: Env): Promise<Response> {
@@ -24,8 +25,8 @@ export async function handleWebhook(request: Request, env: Env): Promise<Respons
         if (topic === 'app/uninstalled') {
             await handleAppUninstalled(shopDomain, env);
         } else if (topic === 'orders/create') {
-            // Placeholder for M6
-            console.log('Received order/create webhook', eventId);
+            const result = await confirmBookingsFromOrder(env.DB, shopDomain, eventId, topic, rawBody);
+            return new Response(result.body, { status: result.status });
         } else {
             console.log('Unhandled webhook topic', topic);
         }

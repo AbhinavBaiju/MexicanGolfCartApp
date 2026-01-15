@@ -1,6 +1,7 @@
 import { Env } from './types';
 import { verifyProxySignature } from './security';
 import { checkRateLimit } from './rateLimit';
+import { releaseBooking } from './bookingService';
 import {
     datePartsToIndex,
     getTodayInTimeZone,
@@ -407,35 +408,7 @@ async function handleRelease(request: Request, env: Env, shopDomain: string): Pr
             return Response.json({ ok: true, status: booking.status });
         }
 
-        const bookingDays = await env.DB.prepare(
-            'SELECT product_id, date, qty FROM booking_days WHERE booking_id = ?'
-        )
-            .bind(booking.id)
-            .all();
-
-        const statements: D1PreparedStatement[] = [];
-        for (const row of bookingDays.results ?? []) {
-            const productId = row.product_id as number;
-            const date = row.date as string;
-            const qty = row.qty as number;
-            statements.push(
-                env.DB.prepare(
-                    `UPDATE inventory_day
-                     SET reserved_qty = reserved_qty - ?
-                     WHERE shop_id = ? AND product_id = ? AND date = ? AND reserved_qty >= ?`
-                ).bind(qty, shopId, productId, date, qty)
-            );
-            statements.push(env.DB.prepare('SELECT CASE WHEN changes() = 1 THEN 1 ELSE 1/0 END;'));
-        }
-        statements.push(
-            env.DB.prepare(
-                `UPDATE bookings
-                 SET status = 'RELEASED', updated_at = datetime('now')
-                 WHERE id = ?`
-            ).bind(booking.id)
-        );
-
-        await env.DB.batch(statements);
+        await releaseBooking(env.DB, booking.id as string, 'RELEASED');
 
         return Response.json({ ok: true, status: 'RELEASED' });
     } catch (e) {

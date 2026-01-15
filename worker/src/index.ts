@@ -2,6 +2,7 @@ import { handleAuth, handleAuthCallback } from './auth';
 import { handleWebhook } from './webhooks';
 import { handleProxyRequest } from './proxy';
 import { handleAdminRequest } from './admin';
+import { handleScheduled } from './scheduled';
 import { Env } from './types';
 
 export default {
@@ -29,5 +30,8 @@ export default {
         }
 
         return new Response('Mexican Golf Cart Worker is Running');
+    },
+    async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+        ctx.waitUntil(handleScheduled(event, env));
     },
 };

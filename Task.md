@@ -100,9 +100,9 @@ Build a Shopify app + theme integration that:
   - [x] UPDATE reserved_qty with a WHERE guard (reserved+req <= capacity)
   - [x] Abort transaction if any day fails
 - [x] Implement release path (decrement reserved_qty) based on booking_days
-- [ ] Implement cleanup job:
-  - [ ] Cron-triggered Worker scheduled() handler
-  - [ ] Find expired holds and release their reservations
+- [x] Implement cleanup job:
+  - [x] Cron-triggered Worker scheduled() handler
+  - [x] Find expired holds and release their reservations
 
 ## M5 — Storefront Widget (Theme App Extension)
 - [ ] Create theme app extension

@@ -105,20 +105,20 @@ Build a Shopify app + theme integration that:
   - [x] Find expired holds and release their reservations
 
 ## M5 — Storefront Widget (Theme App Extension)
-- [ ] Create theme app extension
-- [ ] App block schema:
-  - [ ] Settings: default location, UI labels, style options
-- [ ] Frontend widget:
-  - [ ] Date picker (range)
-  - [ ] Location dropdown
-  - [ ] Quantity selector
-  - [ ] Live availability check (debounced)
-  - [ ] Hold creation on “Reserve” or on “Add to Cart” (start_date <= end_date)
-  - [ ] Cart add using Ajax API with keys: booking_token, booking_start_date, booking_end_date, booking_location
-  - [ ] Show hold countdown + release on abandon (best effort)
-- [ ] Graceful fallbacks:
-  - [ ] If proxy fails, show clear error state
-  - [ ] If hold expires, prompt to re-check availability
+- [x] Create theme app extension
+- [/] App block schema:
+  - [x] Settings: default location, UI labels, style options
+- [/] Frontend widget:
+  - [x] Date picker (range)
+  - [x] Location dropdown
+  - [x] Quantity selector
+  - [x] Live availability check (debounced)
+  - [x] Hold creation on “Reserve” or on “Add to Cart” (start_date <= end_date)
+  - [x] Cart add using Ajax API with keys: booking_token, booking_start_date, booking_end_date, booking_location
+  - [x] Show hold countdown + release on abandon (best effort)
+- [x] Graceful fallbacks:
+  - [x] If proxy fails, show clear error state
+  - [x] If hold expires, prompt to re-check availability
 
 ## M6 — Order Webhook (Confirm / Enforce)
 - [ ] POST /webhooks/orders_create

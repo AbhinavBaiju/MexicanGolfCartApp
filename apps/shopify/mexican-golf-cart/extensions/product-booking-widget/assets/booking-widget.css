@@ -1,0 +1,201 @@
+:root {
+  --gc-color-primary: #C8102E;
+  --gc-color-primary-hover: #A00C24;
+  --gc-color-input-bg: #F7F7F7;
+  --gc-color-text-label: #333333;
+  --gc-color-text-input: #111111;
+  --gc-color-border: #E5E5E5;
+  --gc-color-focus-ring: #007AFF;
+  --gc-radius-container: 20px;
+  --gc-radius-input: 12px;
+  --gc-spacing-unit: 16px;
+  --gc-font-family: inherit;
+  --gc-color-error: #D32F2F;
+  --gc-color-success: #388E3C;
+  --gc-color-timer-bg: #FFF3E0;
+  --gc-color-timer-text: #E65100;
+}
+
+.gc-booking-widget {
+  background-color: #FFFFFF;
+  border-radius: var(--gc-radius-container);
+  padding: 32px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+  font-family: var(--gc-font-family);
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+.gc-form-grid {
+  display: grid;
+  gap: 20px;
+}
+
+/* 50% width on desktop as requested, centered */
+@media (min-width: 768px) {
+  .gc-booking-widget {
+    width: 50%;
+  }
+}
+
+.gc-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gc-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--gc-color-text-label);
+  margin-left: 4px;
+}
+
+.gc-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.gc-input-icon {
+  position: absolute;
+  left: 16px;
+  width: 20px;
+  height: 20px;
+  color: #666;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.gc-input,
+.gc-select {
+  width: 100%;
+  height: 56px;
+  padding: 0 16px 0 48px;
+  /* Left padding for icon */
+  background-color: var(--gc-color-input-bg);
+  border: 1px solid var(--gc-color-border);
+  border-radius: var(--gc-radius-input);
+  font-size: 16px;
+  color: var(--gc-color-text-input);
+  appearance: none;
+  -webkit-appearance: none;
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+.gc-input:focus,
+.gc-select:focus {
+  border-color: var(--gc-color-focus-ring);
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15);
+  background-color: #FFFFFF;
+}
+
+/* Custom chevron for select */
+.gc-select-wrapper {
+  position: relative;
+}
+
+.gc-select-chevron {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 12px;
+  height: 12px;
+  pointer-events: none;
+  color: #666;
+}
+
+/* Date Range specific */
+.gc-date-range {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 480px) {
+  .gc-date-range {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Action Button */
+.gc-submit-btn {
+  width: 100%;
+  height: 56px;
+  background-color: var(--gc-color-primary);
+  color: #FFFFFF;
+  border: none;
+  border-radius: var(--gc-radius-input);
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 8px;
+}
+
+.gc-submit-btn:hover {
+  background-color: var(--gc-color-primary-hover);
+}
+
+.gc-submit-btn:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
+/* Status Messages */
+.gc-status-message {
+  font-size: 14px;
+  font-weight: 500;
+  min-height: 20px;
+  margin-bottom: -10px;
+}
+
+.gc-status-error {
+  color: var(--gc-color-error);
+}
+
+.gc-status-success {
+  color: var(--gc-color-success);
+}
+
+.gc-status-loading {
+  color: #666;
+  font-style: italic;
+}
+
+/* Countdown Timer */
+#gc-timer-container {
+  background-color: var(--gc-color-timer-bg);
+  color: var(--gc-color-timer-text);
+  padding: 12px;
+  border-radius: var(--gc-radius-input);
+  margin-bottom: 16px;
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid #FFE0B2;
+}
+
+/* Error State */
+.gc-error-state {
+  text-align: center;
+  padding: 24px 0;
+}
+
+.gc-error-state p {
+  margin-bottom: 16px;
+  color: #666;
+}
+
+.gc-error-state .gc-submit-btn {
+  margin-top: 0;
+  background-color: #333;
+}

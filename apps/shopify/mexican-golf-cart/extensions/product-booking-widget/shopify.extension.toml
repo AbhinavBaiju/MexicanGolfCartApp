@@ -1,0 +1,5 @@
+name = "Booking Widget"
+type = "theme"
+
+[target]
+type = "theme_app_extension"

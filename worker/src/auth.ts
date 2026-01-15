@@ -143,38 +143,41 @@ async function exchangeAccessToken(shop: string, code: string, env: Env): Promis
 }
 
 async function registerWebhook(shop: string, accessToken: string, env: Env) {
-    const webhook = {
-        webhook: {
+    const webhooks = [
+        {
             topic: 'orders/create',
             address: `${env.SHOPIFY_APP_URL}/webhooks/orders/create`,
             format: 'json',
         },
-    };
-
-    try {
-        // API Version hardcoded or from config? The user request said "2026-04" in TOML
-        // but TOML validation might not match real API availability. Let's use a recent stable version or the one in TOML.
-        // TOML said 2026-04 which is futuristic (current year is 2026 in prompt context).
-        const apiVersion = '2026-04';
-
-        // Check if customized
-        const resp = await fetch(`https://${shop}/admin/api/${apiVersion}/webhooks.json`, {
-            method: 'POST',
-            headers: {
-                'X-Shopify-Access-Token': accessToken,
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(webhook),
-        });
-
-        if (!resp.ok) {
-            // 422 usually means already exists, which is fine
-            const txt = await resp.text();
-            console.log('Webhook registration result:', resp.status, txt);
-        } else {
-            console.log('Webhook registered successfully');
+        {
+            topic: 'app/uninstalled',
+            address: `${env.SHOPIFY_APP_URL}/webhooks/app/uninstalled`,
+            format: 'json',
         }
-    } catch (e) {
-        console.error('Webhook registration failed', e);
+    ];
+
+    const apiVersion = '2026-04';
+
+    for (const hook of webhooks) {
+        try {
+            const resp = await fetch(`https://${shop}/admin/api/${apiVersion}/webhooks.json`, {
+                method: 'POST',
+                headers: {
+                    'X-Shopify-Access-Token': accessToken,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ webhook: hook }),
+            });
+
+            if (!resp.ok) {
+                const txt = await resp.text();
+                // 422 usually means already exists
+                console.log(`Webhook ${hook.topic} registration result:`, resp.status, txt);
+            } else {
+                console.log(`Webhook ${hook.topic} registered successfully`);
+            }
+        } catch (e) {
+            console.error(`Webhook ${hook.topic} registration failed`, e);
+        }
     }
 }

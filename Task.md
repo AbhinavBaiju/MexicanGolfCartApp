@@ -46,9 +46,9 @@ Build a Shopify app + theme integration that:
   - [x] App Proxy path + prefix
   - [x] Required scopes: read_products, read_orders, write_orders (if auto-cancel), read_themes (if needed), etc.
   - [x] Webhook subscriptions: orders/create (+ optional orders/cancelled, orders/updated)
-- [ ] Store install flow:
+- [x] Store install flow:
   - [x] On install: create/verify webhooks, store shop + access token
-  - [ ] On uninstall: delete shop data (or mark inactive)
+  - [x] On uninstall: delete shop data (or mark inactive)
 
 ## M2 — Data Model + Migrations (D1)
 - [x] Create migration framework (wrangler d1 migrations)

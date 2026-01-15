@@ -1,4 +1,5 @@
 import { handleAuth, handleAuthCallback } from './auth';
+import { handleWebhook } from './webhooks';
 import { Env } from './types';
 
 export default {
@@ -11,6 +12,10 @@ export default {
 
         if (url.pathname === '/auth/callback') {
             return handleAuthCallback(request, env);
+        }
+
+        if (url.pathname.startsWith('/webhooks')) {
+            return handleWebhook(request, env);
         }
 
         return new Response('Mexican Golf Cart Worker is Running');

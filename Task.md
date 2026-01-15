@@ -61,7 +61,7 @@ Build a Shopify app + theme integration that:
   - [x] booking_items (product + variant + qty)
   - [x] booking_days (expanded per-day allocations per product)
   - [x] webhook_events (idempotency store)
-- [/] Add indexes/constraints & foreign keys where feasible
+- [x] Add indexes/constraints & foreign keys where feasible
 
 ## M3 — Worker Core (Cloudflare Workers)
 ### 3.1 — Security helpers

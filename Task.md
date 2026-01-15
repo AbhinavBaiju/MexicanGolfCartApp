@@ -37,9 +37,9 @@ Build a Shopify app + theme integration that:
 
 ## M0 — Foundations
 - [x] Create repo structure (apps + worker + shared)
-- [ ] Decide UI hosting: (A) Worker serves SPA assets, or (B) Cloudflare Pages for Admin UI
-- [ ] Create environments: dev/staging/prod (Shopify app + Worker + D1)
-- [ ] Add CI: lint, typecheck, tests, deploy preview
+- [x] Decide UI hosting: Cloudflare Pages (recommended) to host the **Embedded Admin UI** (React routes).
+- [x] Create environments: dev/staging/prod (Shopify app + Worker + D1)
+- [/] Add CI: lint, typecheck, tests, deploy preview
 
 ## M1 — Shopify App Setup
 - [ ] Create Shopify app (CLI) and configure:

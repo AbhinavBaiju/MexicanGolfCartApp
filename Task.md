@@ -51,17 +51,17 @@ Build a Shopify app + theme integration that:
   - [ ] On uninstall: delete shop data (or mark inactive)
 
 ## M2 — Data Model + Migrations (D1)
-- [ ] Create migration framework (wrangler d1 migrations)
-- [ ] Implement tables:
-  - [ ] shops
-  - [ ] products (rentable config + default capacity + deposit mapping)
-  - [ ] locations (lead time days + min duration)
-  - [ ] inventory_day (per product/date capacity & reserved)
-  - [ ] bookings (hold/confirmed/expired/released + dates + location + order_id)
-  - [ ] booking_items (product + variant + qty)
-  - [ ] booking_days (expanded per-day allocations per product)
-  - [ ] webhook_events (idempotency store)
-- [ ] Add indexes/constraints & foreign keys where feasible
+- [x] Create migration framework (wrangler d1 migrations)
+- [x] Implement tables:
+  - [x] shops
+  - [x] products (rentable config + default capacity + deposit mapping)
+  - [x] locations (lead time days + min duration)
+  - [x] inventory_day (per product/date capacity & reserved)
+  - [x] bookings (hold/confirmed/expired/released + dates + location + order_id)
+  - [x] booking_items (product + variant + qty)
+  - [x] booking_days (expanded per-day allocations per product)
+  - [x] webhook_events (idempotency store)
+- [/] Add indexes/constraints & foreign keys where feasible
 
 ## M3 — Worker Core (Cloudflare Workers)
 ### 3.1 — Security helpers

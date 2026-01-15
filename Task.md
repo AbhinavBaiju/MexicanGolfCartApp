@@ -65,13 +65,13 @@ Build a Shopify app + theme integration that:
 
 ## M3 — Worker Core (Cloudflare Workers)
 ### 3.1 — Security helpers
-- [ ] App Proxy signature verification middleware
-- [ ] Webhook HMAC verification middleware (raw body)
+- [x] App Proxy verification middleware
+- [x] Webhook HMAC verification middleware (raw body)
 - [ ] Admin session token auth middleware (JWT: signature, exp, aud, dest)
 - [ ] Rate limiting / abuse guardrails (basic)
 
 ### 3.2 — Storefront Proxy API
-- [ ] GET /proxy/availability
+- [x] GET /proxy/availability
   - [ ] Validate dates (start <= end) / location / qty
   - [ ] Return min-available qty per product + per-day breakdown (optional)
 - [ ] POST /proxy/hold

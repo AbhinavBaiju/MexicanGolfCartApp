@@ -1,6 +1,35 @@
 import { Env } from './types';
 import { verifyHmac } from './security';
 
+interface JwtHeader {
+    alg: string;
+    kid?: string;
+    typ?: string;
+}
+
+export interface SessionTokenPayload {
+    iss: string;
+    dest: string;
+    aud: string | string[];
+    exp: number;
+    nbf?: number;
+    iat?: number;
+    sub?: string;
+    sid?: string;
+}
+
+interface JwksResponse {
+    keys: JsonWebKey[];
+}
+
+const jwksCache: { keys: Map<string, JsonWebKey>; fetchedAt: number } = {
+    keys: new Map<string, JsonWebKey>(),
+    fetchedAt: 0,
+};
+
+const JWKS_CACHE_TTL_MS = 60 * 60 * 1000;
+const DEFAULT_JWKS_URL = 'https://shopify.dev/.well-known/jwks.json';
+
 export async function handleAuth(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     const shop = url.searchParams.get('shop');
@@ -20,6 +49,77 @@ export async function handleAuth(request: Request, env: Env): Promise<Response> 
     const authUrl = `https://${shop}/admin/oauth/authorize?client_id=${env.SHOPIFY_API_KEY}&scope=${scopes}&redirect_uri=${redirectUri}&state=${nonce}&grant_options[]=${accessMode}`;
 
     return Response.redirect(authUrl);
+}
+
+export async function verifySessionToken(
+    token: string,
+    secret: string,
+    apiKey: string,
+    jwksUrl?: string
+): Promise<SessionTokenPayload | null> {
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+        return null;
+    }
+    const [encodedHeader, encodedPayload, encodedSignature] = parts;
+    const header = decodeBase64UrlJson<JwtHeader>(encodedHeader);
+    const payload = decodeBase64UrlJson<SessionTokenPayload>(encodedPayload);
+
+    if (!header || !payload) {
+        return null;
+    }
+
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    if (!Number.isFinite(payload.exp) || payload.exp <= nowSeconds) {
+        return null;
+    }
+    if (payload.nbf && payload.nbf > nowSeconds) {
+        return null;
+    }
+
+    if (!isAudienceMatch(payload.aud, apiKey)) {
+        return null;
+    }
+
+    const destHost = safeUrlHost(payload.dest);
+    const issHost = safeUrlHost(payload.iss);
+    if (!destHost || !issHost || destHost !== issHost) {
+        return null;
+    }
+
+    const signingInput = `${encodedHeader}.${encodedPayload}`;
+    const signature = base64UrlToUint8Array(encodedSignature);
+    const data = new TextEncoder().encode(signingInput);
+
+    if (header.alg === 'RS256') {
+        const jwk = await getShopifyJwk(header.kid, jwksUrl);
+        if (!jwk) {
+            return null;
+        }
+        const key = await crypto.subtle.importKey(
+            'jwk',
+            jwk,
+            { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+            false,
+            ['verify']
+        );
+        const verified = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, signature, data);
+        return verified ? payload : null;
+    }
+
+    if (header.alg === 'HS256') {
+        const key = await crypto.subtle.importKey(
+            'raw',
+            new TextEncoder().encode(secret),
+            { name: 'HMAC', hash: 'SHA-256' },
+            false,
+            ['verify']
+        );
+        const verified = await crypto.subtle.verify('HMAC', key, signature, data);
+        return verified ? payload : null;
+    }
+
+    return null;
 }
 
 export async function handleAuthCallback(request: Request, env: Env): Promise<Response> {
@@ -151,4 +251,70 @@ async function registerWebhook(shop: string, accessToken: string, env: Env) {
             console.error(`Webhook ${hook.topic} registration failed`, e);
         }
     }
+}
+
+function decodeBase64UrlJson<T>(input: string): T | null {
+    try {
+        const json = new TextDecoder().decode(base64UrlToUint8Array(input));
+        return JSON.parse(json) as T;
+    } catch {
+        return null;
+    }
+}
+
+function base64UrlToUint8Array(input: string): Uint8Array {
+    const normalized = input.replace(/-/g, '+').replace(/_/g, '/');
+    const padding = normalized.length % 4 === 0 ? '' : '='.repeat(4 - (normalized.length % 4));
+    const base64 = normalized + padding;
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+}
+
+function isAudienceMatch(aud: string | string[], apiKey: string): boolean {
+    if (typeof aud === 'string') {
+        return aud === apiKey;
+    }
+    if (Array.isArray(aud)) {
+        return aud.includes(apiKey);
+    }
+    return false;
+}
+
+function safeUrlHost(value: string): string | null {
+    try {
+        return new URL(value).host;
+    } catch {
+        return null;
+    }
+}
+
+async function getShopifyJwk(kid?: string, jwksUrl?: string): Promise<JsonWebKey | null> {
+    const url = jwksUrl || DEFAULT_JWKS_URL;
+    const now = Date.now();
+    if (jwksCache.keys.size === 0 || now - jwksCache.fetchedAt > JWKS_CACHE_TTL_MS) {
+        const resp = await fetch(url);
+        if (!resp.ok) {
+            return null;
+        }
+        const data = (await resp.json()) as JwksResponse;
+        const map = new Map<string, JsonWebKey>();
+        for (const key of data.keys) {
+            if (key.kid) {
+                map.set(key.kid, key);
+            }
+        }
+        jwksCache.keys = map;
+        jwksCache.fetchedAt = now;
+    }
+
+    if (kid) {
+        return jwksCache.keys.get(kid) || null;
+    }
+
+    const first = jwksCache.keys.values().next();
+    return first.done ? null : first.value;
 }

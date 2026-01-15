@@ -67,39 +67,39 @@ Build a Shopify app + theme integration that:
 ### 3.1 — Security helpers
 - [x] App Proxy verification middleware
 - [x] Webhook HMAC verification middleware (raw body)
-- [ ] Admin session token auth middleware (JWT: signature, exp, aud, dest)
-- [ ] Rate limiting / abuse guardrails (basic)
+- [x] Admin session token auth middleware (JWT: signature, exp, aud, dest)
+- [x] Rate limiting / abuse guardrails (basic)
 
 ### 3.2 — Storefront Proxy API
 - [x] GET /proxy/availability
-  - [ ] Validate dates (start <= end) / location / qty
-  - [ ] Return min-available qty per product + per-day breakdown (optional)
-- [ ] POST /proxy/hold
-  - [ ] Validate rules (lead time: today+1 day; min duration)
-  - [ ] Transactionally reserve capacity in inventory_day (inclusive range)
-  - [ ] Create booking + booking_token + booking_items + booking_days
-- [ ] POST /proxy/release
-  - [ ] Release capacity and mark booking released
-- [ ] GET /proxy/config
-  - [ ] Return location + product config needed for widget
+  - [x] Validate dates (start <= end) / location / qty
+  - [x] Return min-available qty per product + per-day breakdown (optional)
+- [x] POST /proxy/hold
+  - [x] Validate rules (lead time: today+1 day; min duration)
+  - [x] Transactionally reserve capacity in inventory_day (inclusive range)
+  - [x] Create booking + booking_token + booking_items + booking_days
+- [x] POST /proxy/release
+  - [x] Release capacity and mark booking released
+- [x] GET /proxy/config
+  - [x] Return location + product config needed for widget
 
 ### 3.3 — Admin API (for embedded UI)
-- [ ] GET /admin/locations
-- [ ] POST /admin/locations
-- [ ] PATCH /admin/locations/:id
-- [ ] GET /admin/products (rentable settings)
-- [ ] PATCH /admin/products/:id (default capacity, deposit variant, rentable flag)
-- [ ] GET /admin/inventory?productId=&start_date=&end_date=
-- [ ] PUT /admin/inventory (set capacity overrides for specific days)
-- [ ] GET /admin/bookings?start_date=&end_date=&status=
-- [ ] GET /admin/bookings/:booking_token
+- [x] GET /admin/locations
+- [x] POST /admin/locations
+- [x] PATCH /admin/locations/:id
+- [x] GET /admin/products (rentable settings)
+- [x] PATCH /admin/products/:id (default capacity, deposit variant, rentable flag)
+- [x] GET /admin/inventory?productId=&start_date=&end_date=
+- [x] PUT /admin/inventory (set capacity overrides for specific days)
+- [x] GET /admin/bookings?start_date=&end_date=&status=
+- [x] GET /admin/bookings/:booking_token
 
 ## M4 — Capacity Reservation Algorithm (no overselling)
-- [ ] Implement reservation using **inventory_day** with atomic conditional updates:
-  - [ ] Ensure row exists for each (product, date) with capacity
-  - [ ] UPDATE reserved_qty with a WHERE guard (reserved+req <= capacity)
-  - [ ] Abort transaction if any day fails
-- [ ] Implement release path (decrement reserved_qty) based on booking_days
+- [x] Implement reservation using **inventory_day** with atomic conditional updates:
+  - [x] Ensure row exists for each (product, date) with capacity
+  - [x] UPDATE reserved_qty with a WHERE guard (reserved+req <= capacity)
+  - [x] Abort transaction if any day fails
+- [x] Implement release path (decrement reserved_qty) based on booking_days
 - [ ] Implement cleanup job:
   - [ ] Cron-triggered Worker scheduled() handler
   - [ ] Find expired holds and release their reservations

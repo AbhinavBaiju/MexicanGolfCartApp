@@ -1,6 +1,7 @@
 import { handleAuth, handleAuthCallback } from './auth';
 import { handleWebhook } from './webhooks';
 import { handleProxyRequest } from './proxy';
+import { handleAdminRequest } from './admin';
 import { Env } from './types';
 
 export default {
@@ -21,6 +22,10 @@ export default {
 
         if (url.pathname.startsWith('/proxy')) {
             return handleProxyRequest(request, env);
+        }
+
+        if (url.pathname.startsWith('/admin')) {
+            return handleAdminRequest(request, env);
         }
 
         return new Response('Mexican Golf Cart Worker is Running');

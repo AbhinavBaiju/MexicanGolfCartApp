@@ -42,12 +42,12 @@ Build a Shopify app + theme integration that:
 - [/] Add CI: lint, typecheck, tests, deploy preview
 
 ## M1 — Shopify App Setup
-- [ ] Create Shopify app (CLI) and configure:
-  - [ ] App Proxy path + prefix
-  - [ ] Required scopes: read_products, read_orders, write_orders (if auto-cancel), read_themes (if needed), etc.
-  - [ ] Webhook subscriptions: orders/create (+ optional orders/cancelled, orders/updated)
+- [/] Create Shopify app (CLI) and configure:
+  - [x] App Proxy path + prefix
+  - [x] Required scopes: read_products, read_orders, write_orders (if auto-cancel), read_themes (if needed), etc.
+  - [x] Webhook subscriptions: orders/create (+ optional orders/cancelled, orders/updated)
 - [ ] Store install flow:
-  - [ ] On install: create/verify webhooks, store shop + access token
+  - [x] On install: create/verify webhooks, store shop + access token
   - [ ] On uninstall: delete shop data (or mark inactive)
 
 ## M2 — Data Model + Migrations (D1)

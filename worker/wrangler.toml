@@ -5,6 +5,9 @@ compatibility_date = "2024-01-01"
 # Global bindings (Production by default)
 [vars]
 ENVIRONMENT = "production"
+SHOPIFY_API_KEY = "ec7f70d8e7c5f2ec9cb8b6811b23e491" # Matches client_id in shopify.app.toml
+SHOPIFY_APP_URL = "https://example.com" # Update this to your deployed Worker URL
+
 
 [[d1_databases]]
 binding = "DB"

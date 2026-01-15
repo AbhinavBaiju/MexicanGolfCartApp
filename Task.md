@@ -36,7 +36,7 @@ Build a Shopify app + theme integration that:
 # Milestones (recommended order)
 
 ## M0 — Foundations
-- [ ] Create repo structure (apps + worker + shared)
+- [x] Create repo structure (apps + worker + shared)
 - [ ] Decide UI hosting: (A) Worker serves SPA assets, or (B) Cloudflare Pages for Admin UI
 - [ ] Create environments: dev/staging/prod (Shopify app + Worker + D1)
 - [ ] Add CI: lint, typecheck, tests, deploy preview

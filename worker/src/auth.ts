@@ -1,4 +1,5 @@
 import { Env } from './types';
+import { verifyHmac } from './security';
 
 export async function handleAuth(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -79,37 +80,7 @@ export async function handleAuthCallback(request: Request, env: Env): Promise<Re
     return new Response(`App installed successfully for ${shop}!`);
 }
 
-async function verifyHmac(params: URLSearchParams, secret: string): Promise<boolean> {
-    const hmac = params.get('hmac');
-    if (!hmac) return false;
 
-    const tempParams = new URLSearchParams(params);
-    tempParams.delete('hmac');
-    tempParams.delete('signature'); // usage deprecated, but good to remove
-
-    // Sort parameters
-    const entries = Array.from(tempParams.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-    const message = entries.map(([k, v]) => `${k}=${v}`).join('&');
-
-    const encoder = new TextEncoder();
-    const keyData = encoder.encode(secret);
-    const messageData = encoder.encode(message);
-
-    const key = await crypto.subtle.importKey(
-        'raw',
-        keyData,
-        { name: 'HMAC', hash: 'SHA-256' },
-        false,
-        ['verify']
-    );
-
-    // Convert hex hmac to buffer
-    const signature = new Uint8Array(
-        hmac.match(/[\da-f]{2}/gi)!.map((h) => parseInt(h, 16))
-    );
-
-    return await crypto.subtle.verify('HMAC', key, signature, messageData);
-}
 
 async function exchangeAccessToken(shop: string, code: string, env: Env): Promise<string | null> {
     const body = {

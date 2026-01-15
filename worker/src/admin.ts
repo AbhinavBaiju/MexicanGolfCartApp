@@ -26,7 +26,7 @@ export async function handleAdminRequest(request: Request, env: Env): Promise<Re
     }
 
     const url = new URL(request.url);
-    const path = url.pathname.replace(/^\\/admin/, '');
+    const path = url.pathname.replace(/^\/admin/, '');
     const segments = path.split('/').filter(Boolean);
     const method = request.method.toUpperCase();
 

@@ -62,7 +62,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     elements.location.innerHTML = '<option value="" disabled selected>Select a location</option>';
                     data.locations.forEach(loc => {
                         const option = document.createElement('option');
-                        option.value = loc.id;
+                        option.value = loc.code; // Use location code to match booking storage
                         option.textContent = loc.name;
                         elements.location.appendChild(option);
                     });
@@ -207,10 +207,10 @@ document.addEventListener('DOMContentLoaded', () => {
                             id: variantId,
                             quantity: parseInt(elements.quantity.value),
                             properties: {
-                                '_booking_token': holdData.booking_token,
-                                'Start Date': elements.start.value,
-                                'End Date': elements.end.value,
-                                'Location': elements.location.value
+                                'booking_token': holdData.booking_token,
+                                'booking_start_date': elements.start.value,
+                                'booking_end_date': elements.end.value,
+                                'booking_location': elements.location.value
                             }
                         }]
                     })

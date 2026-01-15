@@ -318,6 +318,17 @@ async function processBookingToken(
         return { status: 'invalid', reason: depositMismatch, bookingId: booking.id };
     }
 
+    // PRD §6.4: Validate capacity again at confirmation time (booking_days must exist)
+    const bookingDaysResult = await db
+        .prepare('SELECT COUNT(*) as count FROM booking_days WHERE booking_id = ?')
+        .bind(booking.id)
+        .first();
+    const bookingDaysCount = bookingDaysResult && typeof bookingDaysResult.count === 'number' ? bookingDaysResult.count : 0;
+    if (bookingDaysCount === 0) {
+        await markBookingInvalid(db, booking.id, 'Capacity allocations missing');
+        return { status: 'invalid', reason: 'Capacity allocations missing', bookingId: booking.id };
+    }
+
     const confirmed = await markBookingConfirmed(db, booking.id, orderId);
     if (!confirmed) {
         const refreshed = await db.prepare('SELECT status, order_id FROM bookings WHERE id = ?').bind(booking.id).first();
@@ -929,8 +940,8 @@ function toPositiveInt(value: unknown): number | null {
         typeof value === 'number'
             ? value
             : typeof value === 'string' && value.trim() !== ''
-              ? Number(value)
-              : NaN;
+                ? Number(value)
+                : NaN;
     if (!Number.isInteger(parsed) || parsed <= 0) {
         return null;
     }

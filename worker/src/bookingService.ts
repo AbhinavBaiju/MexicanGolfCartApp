@@ -1,3 +1,5 @@
+import { Env } from './types';
+
 export type ReleaseTargetStatus = 'RELEASED' | 'EXPIRED';
 
 type BookingStatus = 'HOLD' | 'CONFIRMED' | 'RELEASED' | 'EXPIRED' | 'INVALID' | 'CANCELLED';
@@ -18,6 +20,9 @@ interface BookingDetailRow {
     shop_id: number;
     status: BookingStatus;
     order_id: number | null;
+    start_date: string;
+    end_date: string;
+    location_code: string;
 }
 
 interface BookingItemRow {
@@ -57,6 +62,7 @@ interface ConfirmOrderResult {
 interface ProcessTokenResult {
     status: 'confirmed' | 'invalid';
     reason: string;
+    bookingId: string | null;
 }
 
 interface TokenExtractionResult {
@@ -64,13 +70,31 @@ interface TokenExtractionResult {
     lineItemsByToken: Map<string, OrderLineItem[]>;
 }
 
+interface BookingLineItemMeta {
+    startDate: string | null;
+    endDate: string | null;
+    location: string | null;
+    error?: string;
+}
+
+interface ShopAuthRow {
+    shop_domain: string;
+    access_token: string;
+}
+
+interface OrderCancellationResult {
+    attempted: boolean;
+    succeeded: boolean;
+}
+
 export async function confirmBookingsFromOrder(
-    db: D1Database,
+    env: Env,
     shopDomain: string,
     eventId: string,
     topic: string,
     rawBody: string
 ): Promise<ConfirmOrderResult> {
+    const db = env.DB;
     let shopId: number | null = null;
     let insertedEvent = false;
 
@@ -118,6 +142,8 @@ export async function confirmBookingsFromOrder(
 
         let confirmedCount = 0;
         let invalidCount = 0;
+        let cancellationTriggered = false;
+        let cancellationResult: OrderCancellationResult | null = null;
 
         for (const token of extraction.tokens) {
             const lineItems = extraction.lineItemsByToken.get(token) ?? [];
@@ -127,6 +153,13 @@ export async function confirmBookingsFromOrder(
             } else {
                 invalidCount += 1;
                 console.warn('Booking validation failed', { token, reason: result.reason });
+                if (!cancellationTriggered && shopId) {
+                    cancellationTriggered = true;
+                    cancellationResult = await cancelShopifyOrder(env, shopId, order.id, result.reason);
+                }
+                if (cancellationResult && !cancellationResult.succeeded && result.bookingId) {
+                    await markBookingManualReview(db, result.bookingId, 'Manual cancellation required');
+                }
             }
         }
 
@@ -200,31 +233,57 @@ async function processBookingToken(
     lineItems: OrderLineItem[]
 ): Promise<ProcessTokenResult> {
     const bookingRow = await db
-        .prepare('SELECT id, shop_id, status, order_id FROM bookings WHERE booking_token = ?')
+        .prepare('SELECT id, shop_id, status, order_id, start_date, end_date, location_code FROM bookings WHERE booking_token = ?')
         .bind(bookingToken)
         .first();
     const booking = parseBookingDetailRow(bookingRow);
     if (!booking) {
-        return { status: 'invalid', reason: 'Booking not found' };
+        return { status: 'invalid', reason: 'Booking not found', bookingId: null };
     }
 
     if (booking.shop_id !== shopId) {
         await markBookingInvalid(db, booking.id, 'Booking shop mismatch');
-        return { status: 'invalid', reason: 'Booking shop mismatch' };
+        return { status: 'invalid', reason: 'Booking shop mismatch', bookingId: booking.id };
     }
 
     if (booking.status === 'CONFIRMED' && booking.order_id === orderId) {
-        return { status: 'confirmed', reason: 'Already confirmed' };
+        return { status: 'confirmed', reason: 'Already confirmed', bookingId: booking.id };
     }
 
     if (booking.status !== 'HOLD') {
         await markBookingInvalid(db, booking.id, `Booking status ${booking.status}`);
-        return { status: 'invalid', reason: `Booking status ${booking.status}` };
+        return { status: 'invalid', reason: `Booking status ${booking.status}`, bookingId: booking.id };
     }
 
     if (lineItems.length === 0) {
         await markBookingInvalid(db, booking.id, 'Missing order line items for booking token');
-        return { status: 'invalid', reason: 'Missing order line items' };
+        return { status: 'invalid', reason: 'Missing order line items', bookingId: booking.id };
+    }
+
+    const lineItemMeta = extractBookingMetaFromLineItems(lineItems);
+    if (lineItemMeta.error) {
+        await markBookingInvalid(db, booking.id, lineItemMeta.error);
+        return { status: 'invalid', reason: lineItemMeta.error, bookingId: booking.id };
+    }
+    if (!lineItemMeta.startDate) {
+        await markBookingInvalid(db, booking.id, 'Missing booking start date');
+        return { status: 'invalid', reason: 'Missing booking start date', bookingId: booking.id };
+    }
+    if (!lineItemMeta.endDate) {
+        await markBookingInvalid(db, booking.id, 'Missing booking end date');
+        return { status: 'invalid', reason: 'Missing booking end date', bookingId: booking.id };
+    }
+    if (!lineItemMeta.location) {
+        await markBookingInvalid(db, booking.id, 'Missing booking location');
+        return { status: 'invalid', reason: 'Missing booking location', bookingId: booking.id };
+    }
+    if (lineItemMeta.startDate !== booking.start_date || lineItemMeta.endDate !== booking.end_date) {
+        await markBookingInvalid(db, booking.id, 'Date tampering detected');
+        return { status: 'invalid', reason: 'Date tampering detected', bookingId: booking.id };
+    }
+    if (lineItemMeta.location !== booking.location_code) {
+        await markBookingInvalid(db, booking.id, 'Location tampering detected');
+        return { status: 'invalid', reason: 'Location tampering detected', bookingId: booking.id };
     }
 
     const bookingItemsResult = await db
@@ -234,14 +293,14 @@ async function processBookingToken(
     const bookingItems = normalizeBookingItems(bookingItemsResult.results ?? []);
     if (bookingItems.length === 0) {
         await markBookingInvalid(db, booking.id, 'Booking items missing');
-        return { status: 'invalid', reason: 'Booking items missing' };
+        return { status: 'invalid', reason: 'Booking items missing', bookingId: booking.id };
     }
 
     const uniqueProductIds = Array.from(new Set(bookingItems.map((item) => item.product_id)));
     const productMap = await fetchProductDeposits(db, shopId, uniqueProductIds);
     if (!productMap || productMap.size !== uniqueProductIds.length) {
         await markBookingInvalid(db, booking.id, 'Product configuration missing');
-        return { status: 'invalid', reason: 'Product configuration missing' };
+        return { status: 'invalid', reason: 'Product configuration missing', bookingId: booking.id };
     }
 
     const lineItemKeyQty = buildLineItemKeyMap(lineItems);
@@ -250,13 +309,13 @@ async function processBookingToken(
     const inventoryMismatch = validateBookingItemsMatch(bookingItems, lineItemKeyQty);
     if (inventoryMismatch) {
         await markBookingInvalid(db, booking.id, inventoryMismatch);
-        return { status: 'invalid', reason: inventoryMismatch };
+        return { status: 'invalid', reason: inventoryMismatch, bookingId: booking.id };
     }
 
     const depositMismatch = validateDepositLineItems(bookingItems, productMap, lineItemVariantQty);
     if (depositMismatch) {
         await markBookingInvalid(db, booking.id, depositMismatch);
-        return { status: 'invalid', reason: depositMismatch };
+        return { status: 'invalid', reason: depositMismatch, bookingId: booking.id };
     }
 
     const confirmed = await markBookingConfirmed(db, booking.id, orderId);
@@ -264,13 +323,13 @@ async function processBookingToken(
         const refreshed = await db.prepare('SELECT status, order_id FROM bookings WHERE id = ?').bind(booking.id).first();
         const refreshedStatus = parseBookingStatusRow(refreshed);
         if (refreshedStatus && refreshedStatus.status === 'CONFIRMED' && refreshedStatus.order_id === orderId) {
-            return { status: 'confirmed', reason: 'Already confirmed' };
+            return { status: 'confirmed', reason: 'Already confirmed', bookingId: booking.id };
         }
         await markBookingInvalid(db, booking.id, 'Failed to confirm booking');
-        return { status: 'invalid', reason: 'Failed to confirm booking' };
+        return { status: 'invalid', reason: 'Failed to confirm booking', bookingId: booking.id };
     }
 
-    return { status: 'confirmed', reason: 'Confirmed' };
+    return { status: 'confirmed', reason: 'Confirmed', bookingId: booking.id };
 }
 
 async function markBookingConfirmed(db: D1Database, bookingId: string, orderId: number): Promise<boolean> {
@@ -309,6 +368,80 @@ async function markBookingInvalid(db: D1Database, bookingId: string, reason: str
             return;
         }
         throw e;
+    }
+}
+
+async function markBookingManualReview(db: D1Database, bookingId: string, note: string): Promise<void> {
+    try {
+        await db
+            .prepare(
+                `UPDATE bookings
+                 SET invalid_reason = CASE
+                     WHEN invalid_reason IS NULL OR invalid_reason = '' THEN ?
+                     WHEN instr(invalid_reason, ?) > 0 THEN invalid_reason
+                     ELSE invalid_reason || ' | ' || ?
+                 END,
+                 updated_at = datetime('now')
+                 WHERE id = ?`
+            )
+            .bind(note, note, note, bookingId)
+            .run();
+    } catch (e) {
+        const message = String(e);
+        if (message.includes('no such column: invalid_reason')) {
+            return;
+        }
+        throw e;
+    }
+}
+
+async function cancelShopifyOrder(
+    env: Env,
+    shopId: number,
+    orderId: number,
+    reason: string
+): Promise<OrderCancellationResult> {
+    try {
+        const shopRow = await env.DB.prepare('SELECT shop_domain, access_token FROM shops WHERE id = ?')
+            .bind(shopId)
+            .first();
+        if (!shopRow) {
+            console.error('Shop not found for order cancellation', { shopId, orderId, reason });
+            return { attempted: false, succeeded: false };
+        }
+        const shopAuth = parseShopAuthRow(shopRow);
+        if (!shopAuth) {
+            console.error('Shop credentials missing for order cancellation', { shopId, orderId, reason });
+            return { attempted: false, succeeded: false };
+        }
+
+        const response = await fetch(
+            `https://${shopAuth.shop_domain}/admin/api/2024-04/orders/${orderId}/cancel.json`,
+            {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Shopify-Access-Token': shopAuth.access_token,
+                },
+                body: JSON.stringify({ email: true }),
+            }
+        );
+
+        if (!response.ok) {
+            const errorBody = await response.text();
+            console.error('Failed to cancel Shopify order', {
+                shopId,
+                orderId,
+                status: response.status,
+                reason,
+                errorBody,
+            });
+            return { attempted: true, succeeded: false };
+        }
+        return { attempted: true, succeeded: true };
+    } catch (e) {
+        console.error('Error cancelling Shopify order', { shopId, orderId, reason, error: e });
+        return { attempted: false, succeeded: false };
     }
 }
 
@@ -533,9 +666,128 @@ function extractBookingToken(properties: OrderLineItem['properties']): string | 
 }
 
 function isBookingTokenProperty(name: string): boolean {
-    const normalized = name.trim().toLowerCase().replace(/\s+/g, '_');
-    const stripped = normalized.replace(/^_+/, '');
-    return stripped === 'booking_token';
+    return normalizePropertyName(name) === 'booking_token';
+}
+
+const START_DATE_PROPERTY_KEYS = new Set(['start_date', 'booking_start_date']);
+const END_DATE_PROPERTY_KEYS = new Set(['end_date', 'booking_end_date']);
+const LOCATION_PROPERTY_KEYS = new Set(['location', 'booking_location']);
+
+function extractBookingMetaFromLineItems(lineItems: OrderLineItem[]): BookingLineItemMeta {
+    let startDate: string | null = null;
+    let endDate: string | null = null;
+    let location: string | null = null;
+
+    for (const item of lineItems) {
+        const meta = extractBookingMetaFromProperties(item.properties);
+        if (meta.error) {
+            return meta;
+        }
+        if (meta.startDate) {
+            if (startDate && startDate !== meta.startDate) {
+                return {
+                    startDate,
+                    endDate,
+                    location,
+                    error: 'Inconsistent booking start date across line items',
+                };
+            }
+            startDate = meta.startDate;
+        }
+        if (meta.endDate) {
+            if (endDate && endDate !== meta.endDate) {
+                return {
+                    startDate,
+                    endDate,
+                    location,
+                    error: 'Inconsistent booking end date across line items',
+                };
+            }
+            endDate = meta.endDate;
+        }
+        if (meta.location) {
+            if (location && location !== meta.location) {
+                return {
+                    startDate,
+                    endDate,
+                    location,
+                    error: 'Inconsistent booking location across line items',
+                };
+            }
+            location = meta.location;
+        }
+    }
+
+    return { startDate, endDate, location };
+}
+
+function extractBookingMetaFromProperties(properties: OrderLineItem['properties']): BookingLineItemMeta {
+    let startDate: string | null = null;
+    let endDate: string | null = null;
+    let location: string | null = null;
+
+    if (!properties) {
+        return { startDate, endDate, location };
+    }
+
+    const applyValue = (name: string, value: string): string | null => {
+        const normalized = normalizePropertyName(name);
+        if (START_DATE_PROPERTY_KEYS.has(normalized)) {
+            if (startDate && startDate !== value) {
+                return 'Conflicting booking start date in line item properties';
+            }
+            startDate = value;
+        } else if (END_DATE_PROPERTY_KEYS.has(normalized)) {
+            if (endDate && endDate !== value) {
+                return 'Conflicting booking end date in line item properties';
+            }
+            endDate = value;
+        } else if (LOCATION_PROPERTY_KEYS.has(normalized)) {
+            if (location && location !== value) {
+                return 'Conflicting booking location in line item properties';
+            }
+            location = value;
+        }
+        return null;
+    };
+
+    if (Array.isArray(properties)) {
+        for (const prop of properties) {
+            if (!isRecord(prop)) {
+                continue;
+            }
+            const name = readString(prop.name);
+            const value = readStringOrNumber(prop.value);
+            if (!name || !value) {
+                continue;
+            }
+            const error = applyValue(name, value);
+            if (error) {
+                return { startDate, endDate, location, error };
+            }
+        }
+        return { startDate, endDate, location };
+    }
+
+    if (isRecord(properties)) {
+        for (const [key, rawValue] of Object.entries(properties)) {
+            const name = readString(key);
+            const value = readStringOrNumber(rawValue);
+            if (!name || !value) {
+                continue;
+            }
+            const error = applyValue(name, value);
+            if (error) {
+                return { startDate, endDate, location, error };
+            }
+        }
+    }
+
+    return { startDate, endDate, location };
+}
+
+function normalizePropertyName(name: string): string {
+    return name.trim().toLowerCase().replace(/\s+/g, '_').replace(/^_+/, '');
 }
 
 function parseBookingDetailRow(row: unknown): BookingDetailRow | null {
@@ -546,10 +798,33 @@ function parseBookingDetailRow(row: unknown): BookingDetailRow | null {
     const shopId = toPositiveInt(row.shop_id);
     const status = readBookingStatus(row.status);
     const orderId = toPositiveInt(row.order_id);
-    if (!id || !shopId || !status) {
+    const startDate = readString(row.start_date);
+    const endDate = readString(row.end_date);
+    const locationCode = readString(row.location_code);
+    if (!id || !shopId || !status || !startDate || !endDate || !locationCode) {
         return null;
     }
-    return { id, shop_id: shopId, status, order_id: orderId ?? null };
+    return {
+        id,
+        shop_id: shopId,
+        status,
+        order_id: orderId ?? null,
+        start_date: startDate,
+        end_date: endDate,
+        location_code: locationCode,
+    };
+}
+
+function parseShopAuthRow(row: unknown): ShopAuthRow | null {
+    if (!isRecord(row)) {
+        return null;
+    }
+    const shopDomain = readString(row.shop_domain);
+    const accessToken = readString(row.access_token);
+    if (!shopDomain || !accessToken) {
+        return null;
+    }
+    return { shop_domain: shopDomain, access_token: accessToken };
 }
 
 function parseBookingStatusRow(row: unknown): { status: BookingStatus; order_id: number | null } | null {

@@ -402,7 +402,7 @@ async function handleBookingsGet(request: Request, env: Env, shopId: number): Pr
     }
 
     let sql =
-        'SELECT booking_token, status, location_code, start_date, end_date, order_id, created_at, updated_at FROM bookings WHERE shop_id = ?';
+        'SELECT booking_token, status, location_code, start_date, end_date, order_id, invalid_reason, created_at, updated_at FROM bookings WHERE shop_id = ?';
     const bindings: (string | number)[] = [shopId];
     if (status) {
         sql += ' AND status = ?';
@@ -424,7 +424,7 @@ async function handleBookingsGet(request: Request, env: Env, shopId: number): Pr
 
 async function handleBookingGet(env: Env, shopId: number, bookingToken: string): Promise<Response> {
     const booking = await env.DB.prepare(
-        `SELECT id, booking_token, status, location_code, start_date, end_date, expires_at, order_id, created_at, updated_at
+        `SELECT id, booking_token, status, location_code, start_date, end_date, expires_at, order_id, invalid_reason, created_at, updated_at
          FROM bookings WHERE shop_id = ? AND booking_token = ?`
     )
         .bind(shopId, bookingToken)

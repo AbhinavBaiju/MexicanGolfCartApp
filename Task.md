@@ -127,7 +127,7 @@ Build a Shopify app + theme integration that:
   - [x] Parse line items and extract booking_token + required properties
   - [/] Validate:
     - [x] Booking exists, not expired, matches shop
-    - [ ] Dates/location match booking
+    - [x] Dates/location match booking
     - [x] Deposit line item present (matching token and quantity)
     - [/] Capacity reserved (booking_days exists) (Implicit in booking status check?)
   - [x] Confirm booking:
@@ -135,8 +135,8 @@ Build a Shopify app + theme integration that:
     - [x] Attach order_id
     - [x] Extend reservation: keep reserved_qty
   - [ ] Reject invalid orders:
-    - [ ] If permitted: cancel order via Admin API
-    - [ ] Otherwise: mark booking INVALID and alert in Admin UI
+    - [x] If permitted: cancel order via Admin API
+    - [x] Otherwise: mark booking INVALID and alert in Admin UI
 
 ## M7 — Embedded Admin UI
 - [ ] Build Shopify Admin embedded UI (React + Polaris + App Bridge)

@@ -10,7 +10,12 @@
     <a href="/pages/contact" class="gc-submit-btn">Contact Us to Book</a>
   </div>
 
-  <form class="gc-booking-form" data-product-id="{{ product.id }}" data-variant-id="{{ product.selected_or_first_available_variant.id }}">
+  {% assign booking_product = block.settings.product | default: product %}
+  
+  <form class="gc-booking-form" data-product-id="{{ booking_product.id }}" data-variant-id="{{ booking_product.selected_or_first_available_variant.id }}">
+    {% if booking_product == blank %}
+       <p style="text-align: center; color: red;">Please select a product in the Theme Editor.</p>
+    {% else %}
     <div class="gc-form-grid">
       
       <!-- Countdown Timer -->
@@ -93,6 +98,7 @@
       </button>
 
     </div>
+    {% endif %}
   </form>
 </div>
 
@@ -108,6 +114,11 @@
       "id": "heading",
       "label": "Heading",
       "default": "Book Your Golf Cart"
+    },
+    {
+       "type": "product",
+       "id": "product",
+       "label": "Product to Rent"
     },
     {
       "type": "text",

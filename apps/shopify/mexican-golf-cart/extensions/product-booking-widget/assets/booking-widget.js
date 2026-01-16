@@ -29,6 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const API_BASE = elements.container.dataset.apiBase || '/apps/rental'; // Fallback
 
         // Initialize
+        if (!productId || !elements.location) return;
         init();
 
         function init() {
@@ -143,7 +144,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
 
                 const res = await fetch(`${API_BASE}/availability?${params}`);
-                if (!res.ok) throw new Error('Availability check failed');
+                if (!res.ok) {
+                    const errData = await res.json().catch(() => ({}));
+                    throw new Error(errData.error || `Availability check failed (${res.status})`);
+                }
                 const data = await res.json();
 
                 if (data.available) {

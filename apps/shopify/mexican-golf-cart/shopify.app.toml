@@ -2,7 +2,7 @@
 
 client_id = "ec7f70d8e7c5f2ec9cb8b6811b23e491"
 name = "mexican-golf-cart"
-application_url = "https://mexican-golf-cart-worker.explaincaption.workers.dev"
+application_url = "https://mexican-golf-cart-admin.pages.dev"
 embedded = true
 
 [build]

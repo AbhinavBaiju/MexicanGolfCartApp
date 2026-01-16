@@ -4,7 +4,7 @@ export interface DateParts {
     day: number;
 }
 
-const ISO_DATE_RE = /^\\d{4}-\\d{2}-\\d{2}$/;
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export function parseDateParts(value: string): DateParts | null {
     if (!ISO_DATE_RE.test(value)) {

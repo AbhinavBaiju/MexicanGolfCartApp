@@ -9,13 +9,13 @@ crons = ["*/5 * * * *"]
 [vars]
 ENVIRONMENT = "production"
 SHOPIFY_API_KEY = "ec7f70d8e7c5f2ec9cb8b6811b23e491" # Matches client_id in shopify.app.toml
-SHOPIFY_APP_URL = "https://example.com" # Update this to your deployed Worker URL
+SHOPIFY_APP_URL = "https://mexican-golf-cart-worker.explaincaption.workers.dev"
 
 
 [[d1_databases]]
 binding = "DB"
 database_name = "mexican-golf-cart-db-prod"
-database_id = "INSERT_PROD_DB_ID_HERE"
+database_id = "61380274-7091-41f0-b6b1-eb0a587a7687"
 
 # Development Environment (wrangler dev --env dev)
 [env.dev]
@@ -24,7 +24,7 @@ ENVIRONMENT = "dev"
 [[env.dev.d1_databases]]
 binding = "DB"
 database_name = "mexican-golf-cart-db-dev"
-database_id = "INSERT_DEV_DB_ID_HERE"
+database_id = "73603dc3-c26d-4b7a-951a-71afce999e4a"
 
 # Staging Environment
 [env.staging]
@@ -33,4 +33,4 @@ ENVIRONMENT = "staging"
 [[env.staging.d1_databases]]
 binding = "DB"
 database_name = "mexican-golf-cart-db-staging"
-database_id = "INSERT_STAGING_DB_ID_HERE"
+database_id = "61380274-7091-41f0-b6b1-eb0a587a7687"

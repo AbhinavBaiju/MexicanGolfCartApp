@@ -2,7 +2,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const forms = document.querySelectorAll('.gc-booking-form');
 
     // Configuration
-    const API_BASE = '/apps/rental';
+    // const API_BASE = '/apps/rental'; // Removed in favor of direct
     const DEBOUNCE_DELAY = 500;
 
     forms.forEach(form => {
@@ -25,6 +25,8 @@ document.addEventListener('DOMContentLoaded', () => {
         let debounceTimer = null;
         let countdownInterval = null;
         let currentBookingToken = null;
+        const shopDomain = elements.container.dataset.shopDomain;
+        const API_BASE = elements.container.dataset.apiBase || '/apps/rental'; // Fallback
 
         // Initialize
         init();
@@ -42,7 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
         function handleAbandon() {
             if (currentBookingToken) {
                 const blob = new Blob([JSON.stringify({ booking_token: currentBookingToken })], { type: 'application/json' });
-                navigator.sendBeacon(`${API_BASE}/release`, blob);
+                navigator.sendBeacon(`${API_BASE}/release?shop=${shopDomain}`, blob);
             }
         }
 
@@ -54,8 +56,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         async function fetchLocations() {
             try {
-                const res = await fetch(`${API_BASE}/config`);
-                if (!res.ok) throw new Error('Failed to load locations');
+                const res = await fetch(`${API_BASE}/config?shop=${shopDomain}`);
+                if (!res.ok) {
+                    const txt = await res.text();
+                    throw new Error(`Failed to load locations: ${res.status} ${txt}`);
+                }
                 const data = await res.json();
 
                 if (data.locations && data.locations.length > 0) {
@@ -133,7 +138,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     start_date: elements.start.value,
                     end_date: elements.end.value,
                     location: elements.location.value,
-                    quantity: elements.quantity.value
+                    quantity: elements.quantity.value,
+                    shop: shopDomain
                 });
 
                 const res = await fetch(`${API_BASE}/availability?${params}`);
@@ -168,7 +174,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             try {
                 // 1. Create Hold
-                const holdRes = await fetch(`${API_BASE}/hold`, {
+                const holdRes = await fetch(`${API_BASE}/hold?shop=${shopDomain}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({

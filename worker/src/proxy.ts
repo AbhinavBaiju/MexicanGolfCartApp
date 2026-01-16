@@ -47,9 +47,21 @@ export async function handleProxyRequest(request: Request, env: Env): Promise<Re
     const url = new URL(request.url);
     const shop = url.searchParams.get('shop');
 
+    const corsHeaders = {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+    };
+
     const rate = checkRateLimit(rateLimitKey(request, 'proxy'), 240, 60_000);
     if (!rate.allowed) {
-        return rateLimitResponse(rate.resetAt);
+        return new Response('Rate limit exceeded', {
+            status: 429,
+            headers: {
+                ...corsHeaders,
+                ...rateLimitResponse(rate.resetAt).headers
+            }
+        });
     }
 
     // 1. Verify Signature 
@@ -63,35 +75,43 @@ export async function handleProxyRequest(request: Request, env: Env): Promise<Re
     // }
 
     if (!shop) {
-        return new Response('Missing shop parameter', { status: 400 });
+        return new Response('Missing shop parameter', { status: 400, headers: corsHeaders });
     }
 
+    let response: Response;
     if (url.pathname.endsWith('/availability')) {
-        return handleAvailability(request, env, shop);
-    }
-
-    if (url.pathname.endsWith('/hold')) {
+        response = await handleAvailability(request, env, shop);
+    } else if (url.pathname.endsWith('/hold')) {
         if (request.method.toUpperCase() !== 'POST') {
-            return new Response('Method Not Allowed', { status: 405 });
+            response = new Response('Method Not Allowed', { status: 405 });
+        } else {
+            response = await handleHold(request, env, shop);
         }
-        return handleHold(request, env, shop);
-    }
-
-    if (url.pathname.endsWith('/release')) {
+    } else if (url.pathname.endsWith('/release')) {
         if (request.method.toUpperCase() !== 'POST') {
-            return new Response('Method Not Allowed', { status: 405 });
+            response = new Response('Method Not Allowed', { status: 405 });
+        } else {
+            response = await handleRelease(request, env, shop);
         }
-        return handleRelease(request, env, shop);
-    }
-
-    if (url.pathname.endsWith('/config')) {
+    } else if (url.pathname.endsWith('/config')) {
         if (request.method.toUpperCase() !== 'GET') {
-            return new Response('Method Not Allowed', { status: 405 });
+            response = new Response('Method Not Allowed', { status: 405 });
+        } else {
+            response = await handleConfig(env, shop);
         }
-        return handleConfig(env, shop);
+    } else {
+        response = new Response('Not Found', { status: 404 });
     }
 
-    return new Response('Not Found', { status: 404 });
+    // Append CORS headers to whatever response we got
+    const newHeaders = new Headers(response.headers);
+    Object.entries(corsHeaders).forEach(([k, v]) => newHeaders.set(k, v));
+
+    return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: newHeaders
+    });
 }
 
 async function handleAvailability(request: Request, env: Env, shopDomain: string): Promise<Response> {

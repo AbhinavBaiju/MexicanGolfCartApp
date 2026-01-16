@@ -1,4 +1,4 @@
-<div class="gc-booking-widget" data-booking-widget>
+<div class="gc-booking-widget" data-booking-widget data-shop-domain="{{ shop.permanent_domain }}" data-api-base="https://mexican-golf-cart-worker.explaincaption.workers.dev/proxy">
   {% if block.settings.heading != blank %}
     <h2 style="text-align: center; margin-bottom: 24px; font-size: 24px; font-weight: 700;">
       {{ block.settings.heading }}
@@ -98,7 +98,7 @@
 
 {% schema %}
 {
-  "name": "Booking Widget",
+  "name": "Booking Widget (v2)",
   "target": "section",
   "stylesheet": "booking-widget.css",
   "javascript": "booking-widget.js",

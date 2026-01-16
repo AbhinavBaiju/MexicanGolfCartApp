@@ -1,4 +1,6 @@
 import { Env } from './types';
+import { datePartsToIndex, getTodayInTimeZone, parseDateParts } from './date';
+import { STORE_TIMEZONE } from './config';
 
 export type ReleaseTargetStatus = 'RELEASED' | 'EXPIRED';
 
@@ -85,6 +87,11 @@ interface ShopAuthRow {
 interface OrderCancellationResult {
     attempted: boolean;
     succeeded: boolean;
+}
+
+interface LocationRules {
+    leadTimeDays: number;
+    minDurationDays: number;
 }
 
 export async function confirmBookingsFromOrder(
@@ -286,6 +293,18 @@ async function processBookingToken(
         return { status: 'invalid', reason: 'Location tampering detected', bookingId: booking.id };
     }
 
+    const dateRuleError = await validateBookingDateRules(
+        db,
+        shopId,
+        booking.location_code,
+        booking.start_date,
+        booking.end_date
+    );
+    if (dateRuleError) {
+        await markBookingInvalid(db, booking.id, dateRuleError);
+        return { status: 'invalid', reason: dateRuleError, bookingId: booking.id };
+    }
+
     const bookingItemsResult = await db
         .prepare('SELECT product_id, variant_id, qty FROM booking_items WHERE booking_id = ?')
         .bind(booking.id)
@@ -479,6 +498,70 @@ async function fetchProductDeposits(
         map.set(row.product_id, row);
     }
     return map;
+}
+
+async function validateBookingDateRules(
+    db: D1Database,
+    shopId: number,
+    locationCode: string,
+    startDate: string,
+    endDate: string
+): Promise<string | null> {
+    const startParts = parseDateParts(startDate);
+    const endParts = parseDateParts(endDate);
+    if (!startParts || !endParts) {
+        return 'Invalid booking dates';
+    }
+
+    const startIndex = datePartsToIndex(startParts);
+    const endIndex = datePartsToIndex(endParts);
+    if (startIndex > endIndex) {
+        return 'Invalid booking date range';
+    }
+
+    const rules = await fetchLocationRules(db, shopId, locationCode);
+    if (!rules) {
+        return 'Location rules missing';
+    }
+
+    const todayStr = getTodayInTimeZone(STORE_TIMEZONE);
+    const todayParts = parseDateParts(todayStr);
+    if (!todayParts) {
+        return 'Failed to read store date';
+    }
+    const todayIndex = datePartsToIndex(todayParts);
+    const durationDays = endIndex - startIndex + 1;
+
+    if (startIndex < todayIndex + rules.leadTimeDays) {
+        return 'Start date violates lead time';
+    }
+    if (durationDays < rules.minDurationDays) {
+        return 'Below minimum duration';
+    }
+
+    return null;
+}
+
+async function fetchLocationRules(
+    db: D1Database,
+    shopId: number,
+    locationCode: string
+): Promise<LocationRules | null> {
+    const row = await db
+        .prepare(
+            'SELECT lead_time_days, min_duration_days FROM locations WHERE shop_id = ? AND code = ? AND active = 1'
+        )
+        .bind(shopId, locationCode)
+        .first();
+    if (!isRecord(row)) {
+        return null;
+    }
+    const leadTimeDays = toNonNegativeInt(row.lead_time_days);
+    const minDurationDays = toPositiveInt(row.min_duration_days);
+    if (leadTimeDays === null || minDurationDays === null) {
+        return null;
+    }
+    return { leadTimeDays, minDurationDays };
 }
 
 function validateBookingItemsMatch(bookingItems: BookingItemRow[], lineItemKeyQty: Map<string, number>): string | null {
@@ -943,6 +1026,19 @@ function toPositiveInt(value: unknown): number | null {
                 ? Number(value)
                 : NaN;
     if (!Number.isInteger(parsed) || parsed <= 0) {
+        return null;
+    }
+    return parsed;
+}
+
+function toNonNegativeInt(value: unknown): number | null {
+    const parsed =
+        typeof value === 'number'
+            ? value
+            : typeof value === 'string' && value.trim() !== ''
+                ? Number(value)
+                : NaN;
+    if (!Number.isInteger(parsed) || parsed < 0) {
         return null;
     }
     return parsed;

@@ -8,6 +8,7 @@ import {
     listDateStrings,
     parseDateParts,
 } from './date';
+import { STORE_TIMEZONE } from './config';
 
 interface AvailabilityResponse {
     ok: boolean;
@@ -151,14 +152,13 @@ async function handleAvailability(request: Request, env: Env, shopDomain: string
     }
 
     try {
-        const shopStmt = await env.DB.prepare('SELECT id, timezone FROM shops WHERE shop_domain = ?')
+        const shopStmt = await env.DB.prepare('SELECT id FROM shops WHERE shop_domain = ?')
             .bind(shopDomain)
             .first();
         if (!shopStmt) {
             return Response.json({ ok: false, error: 'Shop not found' }, { status: 404 });
         }
         const shopId = shopStmt.id as number;
-        const shopTimezone = (shopStmt.timezone as string) || 'UTC';
 
         const locStmt = await env.DB.prepare(
             'SELECT id, lead_time_days, min_duration_days FROM locations WHERE shop_id = ? AND code = ? AND active = 1'
@@ -169,7 +169,7 @@ async function handleAvailability(request: Request, env: Env, shopDomain: string
             return Response.json({ ok: false, error: 'Invalid location' }, { status: 400 });
         }
 
-        const todayStr = getTodayInTimeZone(shopTimezone);
+        const todayStr = getTodayInTimeZone(STORE_TIMEZONE);
         const todayParts = parseDateParts(todayStr);
         if (!todayParts) {
             return Response.json({ ok: false, error: 'Failed to read store date' }, { status: 500 });
@@ -264,14 +264,13 @@ async function handleHold(request: Request, env: Env, shopDomain: string): Promi
     }
 
     try {
-        const shopStmt = await env.DB.prepare('SELECT id, timezone FROM shops WHERE shop_domain = ?')
+        const shopStmt = await env.DB.prepare('SELECT id FROM shops WHERE shop_domain = ?')
             .bind(shopDomain)
             .first();
         if (!shopStmt) {
             return Response.json({ ok: false, error: 'Shop not found' }, { status: 404 });
         }
         const shopId = shopStmt.id as number;
-        const shopTimezone = (shopStmt.timezone as string) || 'UTC';
 
         const location = await env.DB.prepare(
             'SELECT code, lead_time_days, min_duration_days FROM locations WHERE shop_id = ? AND code = ? AND active = 1'
@@ -293,7 +292,7 @@ async function handleHold(request: Request, env: Env, shopDomain: string): Promi
             return Response.json({ ok: false, error: 'Start date must be before end date' }, { status: 400 });
         }
 
-        const todayStr = getTodayInTimeZone(shopTimezone);
+        const todayStr = getTodayInTimeZone(STORE_TIMEZONE);
         const todayParts = parseDateParts(todayStr);
         if (!todayParts) {
             return Response.json({ ok: false, error: 'Failed to read store date' }, { status: 500 });

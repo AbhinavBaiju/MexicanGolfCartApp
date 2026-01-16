@@ -5,10 +5,12 @@
     "main": "src/index.ts",
     "scripts": {
         "dev": "wrangler dev src/index.ts",
-        "deploy": "wrangler deploy --minify src/index.ts"
+        "deploy": "wrangler deploy --minify src/index.ts",
+        "test": "node --test --import tsx"
     },
     "devDependencies": {
         "@cloudflare/workers-types": "^4.20260115.0",
+        "tsx": "^4.20.5",
         "typescript": "^5.9.3"
     }
 }

@@ -2,3 +2,11 @@
 node_modules/
 .agent/
 *.log
+
+# local env
+.env
+**/.env
+
+# build artifacts
+**/dist/
+**/build/

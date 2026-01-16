@@ -139,16 +139,16 @@ Build a Shopify app + theme integration that:
     - [x] Otherwise: mark booking INVALID and alert in Admin UI
 
 ## M7 — Embedded Admin UI
-- [ ] Build Shopify Admin embedded UI (React + Polaris + App Bridge)
-- [ ] Pages:
-  - [ ] Dashboard: today’s pickups/dropoffs & upcoming bookings
-  - [ ] Inventory calendar: per product, per day capacity & reserved
-  - [ ] Locations: edit lead time (days) + min duration
-  - [ ] Products: mark rentable + set default capacity + deposit variant
-  - [ ] Bookings list: search by date/status/token
-- [ ] Auth:
-  - [ ] Fetch session token and call Worker /admin endpoints
-  - [ ] Handle token refresh and 401s
+- [x] Build Shopify Admin embedded UI (React + Polaris + App Bridge)
+- [x] Pages:
+  - [x] Dashboard: today’s pickups/dropoffs & upcoming bookings
+  - [x] Inventory calendar: per product, per day capacity & reserved
+  - [x] Locations: edit lead time (days) + min duration
+  - [x] Products: mark rentable + set default capacity + deposit variant
+  - [x] Bookings list: search by date/status/token
+- [x] Auth:
+  - [x] Fetch session token and call Worker /admin endpoints
+  - [x] Handle token refresh and 401s
 
 ## M8 — Quality & Testing
 - [ ] Unit tests (date math, validation, reservation algorithm)

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
     Page,
     Layout,
@@ -44,6 +44,9 @@ interface DashboardData {
 
 export default function Dashboard() {
     const fetchAuth = useAuthenticatedFetch();
+    const fetchRef = useRef(fetchAuth);
+    fetchRef.current = fetchAuth;
+
     const [data, setData] = useState<DashboardData | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -52,7 +55,7 @@ export default function Dashboard() {
         setLoading(true);
         setError(null);
         try {
-            const res = await fetchAuth('dashboard');
+            const res = await fetchRef.current('/dashboard');
             if (res.ok) {
                 const json = await res.json();
                 if (json.ok) {
@@ -68,7 +71,7 @@ export default function Dashboard() {
         } finally {
             setLoading(false);
         }
-    }, [fetchAuth]);
+    }, []);
 
     useEffect(() => {
         loadData();
@@ -173,8 +176,8 @@ export default function Dashboard() {
                                         rows={upcomingBookings.map(b => [
                                             `${b.start_date} - ${b.end_date}`,
                                             b.location_code,
-                                            <Link url={`/bookings/${b.booking_token}`}>{b.booking_token}</Link>,
-                                            <StatusBadge status={b.status} />
+                                            <Link key={b.booking_token} url={`/bookings/${b.booking_token}`}>{b.booking_token.slice(0, 8)}...</Link>,
+                                            <StatusBadge key={`status-${b.booking_token}`} status={b.status} />
                                         ])}
                                     />
                                 )}
@@ -195,9 +198,9 @@ export default function Dashboard() {
                                         headings={['Created At', 'Token', 'Date Range', 'Status', 'Notes']}
                                         rows={recentHistory.map(b => [
                                             new Date(b.created_at || '').toLocaleDateString() + ' ' + new Date(b.created_at || '').toLocaleTimeString(),
-                                            <Link url={`/bookings/${b.booking_token}`}>{b.booking_token}</Link>,
+                                            <Link key={b.booking_token} url={`/bookings/${b.booking_token}`}>{b.booking_token.slice(0, 8)}...</Link>,
                                             `${b.start_date} -> ${b.end_date}`,
-                                            <StatusBadge status={b.status} />,
+                                            <StatusBadge key={`status-${b.booking_token}`} status={b.status} />,
                                             b.invalid_reason || '-'
                                         ])}
                                     />
@@ -225,7 +228,7 @@ function StatCard({ title, value, tone }: { title: string, value: number, tone?:
 function BookingRow({ booking, type }: { booking: BookingSummary, type: 'pickup' | 'dropoff' }) {
     return (
         <InlineGrid columns={['oneThird', 'twoThirds']} alignItems="center">
-            <Link url={`/bookings/${booking.booking_token}`}>{booking.booking_token}</Link>
+            <Link url={`/bookings/${booking.booking_token}`}>{booking.booking_token.slice(0, 8)}...</Link>
             <BlockStack>
                 <Text as="span" variant="bodySm">{booking.location_code}</Text>
                 <Text as="span" variant="bodyXs" tone="subdued">{type === 'pickup' ? 'Pickup' : 'Dropoff'}</Text>

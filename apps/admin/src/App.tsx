@@ -1,6 +1,7 @@
-import { AppProvider as PolarisProvider, Frame, Navigation } from '@shopify/polaris';
+import { AppProvider as PolarisProvider, Frame } from '@shopify/polaris';
+import { NavMenu } from '@shopify/app-bridge-react';
 import enTranslations from '@shopify/polaris/locales/en.json';
-import { BrowserRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 
 
 // Pages
@@ -11,54 +12,15 @@ import Products from './pages/Products';
 import Locations from './pages/Locations';
 
 function AppContent() {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const appSearch = location.search;
-
-  const appUrl = (path: string) => `${path}${appSearch}`;
-  const handleNavigate = (path: string) => navigate(appUrl(path));
-
-  const navigationMarkup = (
-    <Navigation location={location.pathname}>
-      <Navigation.Section
-        items={[
-          {
-            url: appUrl('/'),
-            label: 'Dashboard',
-            onClick: () => handleNavigate('/'),
-            selected: location.pathname === '/',
-          },
-          {
-            url: appUrl('/bookings'),
-            label: 'Bookings',
-            onClick: () => handleNavigate('/bookings'),
-            selected: location.pathname === '/bookings',
-          },
-          {
-            url: appUrl('/inventory'),
-            label: 'Inventory',
-            onClick: () => handleNavigate('/inventory'),
-            selected: location.pathname === '/inventory',
-          },
-          {
-            url: appUrl('/products'),
-            label: 'Products',
-            onClick: () => handleNavigate('/products'),
-            selected: location.pathname === '/products',
-          },
-          {
-            url: appUrl('/locations'),
-            label: 'Locations',
-            onClick: () => handleNavigate('/locations'),
-            selected: location.pathname === '/locations',
-          },
-        ]}
-      />
-    </Navigation>
-  );
-
   return (
-    <Frame navigation={navigationMarkup}>
+    <Frame>
+      <NavMenu>
+        <a href="/" rel="home">Dashboard</a>
+        <a href="/bookings">Bookings</a>
+        <a href="/inventory">Inventory</a>
+        <a href="/products">Products</a>
+        <a href="/locations">Locations</a>
+      </NavMenu>
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/bookings" element={<Bookings />} />

@@ -18,8 +18,12 @@ export interface SessionTokenPayload {
     sid?: string;
 }
 
+interface JsonWebKeyWithKid extends JsonWebKey {
+    kid?: string;
+}
+
 interface JwksResponse {
-    keys: JsonWebKey[];
+    keys: JsonWebKeyWithKid[];
 }
 
 const jwksCache: { keys: Map<string, JsonWebKey>; fetchedAt: number } = {
@@ -103,7 +107,7 @@ export async function verifySessionToken(
             false,
             ['verify']
         );
-        const verified = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, signature, data);
+        const verified = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, signature as BufferSource, data as BufferSource);
         return verified ? payload : null;
     }
 
@@ -115,7 +119,7 @@ export async function verifySessionToken(
             false,
             ['verify']
         );
-        const verified = await crypto.subtle.verify('HMAC', key, signature, data);
+        const verified = await crypto.subtle.verify('HMAC', key, signature as BufferSource, data as BufferSource);
         return verified ? payload : null;
     }
 

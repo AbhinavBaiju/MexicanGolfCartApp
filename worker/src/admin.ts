@@ -1,7 +1,7 @@
 import { Env } from './types';
 import { SessionTokenPayload, verifySessionToken } from './auth';
 import { checkRateLimit } from './rateLimit';
-import { listDateStrings, parseDateParts } from './date';
+import { listDateStrings, parseDateParts, getTodayInTimeZone } from './date';
 
 interface AdminAuthContext {
     shopId: number;
@@ -77,6 +77,12 @@ export async function handleAdminRequest(request: Request, env: Env): Promise<Re
     if (segments.length === 1 && segments[0] === 'bookings') {
         if (method === 'GET') {
             return handleBookingsGet(request, env, auth.shopId);
+        }
+    }
+
+    if (segments.length === 1 && segments[0] === 'dashboard') {
+        if (method === 'GET') {
+            return handleDashboardGet(env, auth.shopId);
         }
     }
 
@@ -343,10 +349,10 @@ async function handleInventoryPut(request: Request, env: Env, shopId: number): P
         }
         const date = getString(entry, 'date');
         const capacity = getNumber(entry, 'capacity');
-        if (!date || !parseDateParts(date)) {
+        if (date === null || !parseDateParts(date)) {
             return jsonError('Invalid override date', 400);
         }
-        if (!Number.isInteger(capacity) || capacity < 0) {
+        if (capacity === null || !Number.isInteger(capacity) || capacity < 0) {
             return jsonError('Invalid override capacity', 400);
         }
         if (seenDates.has(date)) {
@@ -449,6 +455,67 @@ async function handleBookingGet(env: Env, shopId: number, bookingToken: string):
         booking,
         items: items.results ?? [],
         days: days.results ?? [],
+    });
+}
+
+async function handleDashboardGet(env: Env, shopId: number): Promise<Response> {
+    const timeZone = 'America/Mexico_City'; // TODO: Configurable per shop
+    const today = getTodayInTimeZone(timeZone);
+
+    const activeBookingsStmt = env.DB.prepare(
+        `SELECT COUNT(*) as count FROM bookings 
+         WHERE shop_id = ? AND status = 'confirmed' AND start_date <= ? AND end_date >= ?`
+    ).bind(shopId, today, today);
+
+    const pendingHoldsStmt = env.DB.prepare(
+        `SELECT COUNT(*) as count FROM bookings 
+         WHERE shop_id = ? AND status = 'hold'`
+    ).bind(shopId);
+
+    const pickupsStmt = env.DB.prepare(
+        `SELECT booking_token, location_code, order_id, status FROM bookings 
+         WHERE shop_id = ? AND start_date = ? AND status IN ('confirmed', 'hold')`
+    ).bind(shopId, today);
+
+    const dropoffsStmt = env.DB.prepare(
+        `SELECT booking_token, location_code, order_id, status FROM bookings 
+         WHERE shop_id = ? AND end_date = ? AND status IN ('confirmed', 'hold')`
+    ).bind(shopId, today);
+
+    const upcomingStmt = env.DB.prepare(
+        `SELECT booking_token, start_date, end_date, location_code, status FROM bookings 
+         WHERE shop_id = ? AND start_date > ? AND status = 'confirmed' 
+         ORDER BY start_date ASC LIMIT 5`
+    ).bind(shopId, today);
+
+    const historyStmt = env.DB.prepare(
+        `SELECT booking_token, start_date, end_date, status, created_at, invalid_reason FROM bookings 
+         WHERE shop_id = ? 
+         ORDER BY created_at DESC LIMIT 10`
+    ).bind(shopId);
+
+    const [active, pending, pickups, dropoffs, upcoming, history] = await env.DB.batch([
+        activeBookingsStmt,
+        pendingHoldsStmt,
+        pickupsStmt,
+        dropoffsStmt,
+        upcomingStmt,
+        historyStmt
+    ]);
+
+    return Response.json({
+        ok: true,
+        todayDate: today,
+        stats: {
+            active_bookings: (active.results?.[0] as any)?.count ?? 0,
+            pending_holds: (pending.results?.[0] as any)?.count ?? 0,
+        },
+        todayActivity: {
+            pickups: pickups.results ?? [],
+            dropoffs: dropoffs.results ?? [],
+        },
+        upcomingBookings: upcoming.results ?? [],
+        recentHistory: history.results ?? []
     });
 }
 

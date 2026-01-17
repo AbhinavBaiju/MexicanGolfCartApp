@@ -491,7 +491,7 @@ function normalizeHoldItems(
         }
 
         const variantId = product.variant_id ?? item.variant_id;
-        if (!Number.isInteger(variantId) || variantId <= 0) {
+        if (variantId === undefined || variantId === null || !Number.isInteger(variantId) || variantId <= 0) {
             return null;
         }
         if (product.variant_id && item.variant_id && product.variant_id !== item.variant_id) {
@@ -538,10 +538,10 @@ function parseHoldBody(body: Record<string, unknown>): HoldRequestBody | null {
         const qty = getNumber(entry, 'qty');
         const variantId = getOptionalNumber(entry, 'variant_id');
 
-        if (!Number.isInteger(productId) || productId <= 0) {
+        if (productId === null || !Number.isInteger(productId) || productId <= 0) {
             return null;
         }
-        if (!Number.isInteger(qty) || qty <= 0) {
+        if (qty === null || !Number.isInteger(qty) || qty <= 0) {
             return null;
         }
         if (variantId !== undefined && (!Number.isInteger(variantId) || variantId <= 0)) {

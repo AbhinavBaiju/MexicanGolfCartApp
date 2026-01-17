@@ -12,7 +12,7 @@ export async function handleScheduled(event: ScheduledEvent, env: Env): Promise<
     ).all();
 
     for (const row of expired.results ?? []) {
-        const bookingId = (row as ExpiredBookingRow).id;
+        const bookingId = (row as unknown as ExpiredBookingRow).id;
         if (!bookingId) {
             continue;
         }

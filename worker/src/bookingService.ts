@@ -215,7 +215,7 @@ export async function releaseBooking(
     statements.push(db.prepare('SELECT CASE WHEN changes() = 1 THEN 1 ELSE 1/0 END;'));
 
     for (const row of bookingDays.results ?? []) {
-        const bookingDay = row as BookingDayRow;
+        const bookingDay = row as unknown as BookingDayRow;
         const productId = bookingDay.product_id;
         const date = bookingDay.date;
         const qty = bookingDay.qty;
@@ -371,7 +371,7 @@ async function markBookingConfirmed(db: D1Database, bookingId: string, orderId: 
         )
         .bind(orderId, bookingId)
         .run();
-    return (result.changes ?? 0) > 0;
+    return (result.meta?.changes ?? 0) > 0;
 }
 
 async function markBookingInvalid(db: D1Database, bookingId: string, reason: string): Promise<void> {

@@ -1,11 +1,12 @@
 import { useAppBridge } from '@shopify/app-bridge-react';
 
 export function useAuthenticatedFetch() {
-    const app = useAppBridge();
+    // In App Bridge v4, useAppBridge() returns the shopify object directly
+    const shopify = useAppBridge();
 
     return async (url: string, options: RequestInit = {}) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const token = await (app as any).id.getSessionToken();
+        // App Bridge v4 uses shopify.idToken() instead of deprecated app.id.getSessionToken()
+        const token = await shopify.idToken();
         const headers = {
             ...options.headers,
             Authorization: `Bearer ${token}`,
@@ -29,3 +30,4 @@ export function useAuthenticatedFetch() {
         return response;
     };
 }
+

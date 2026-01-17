@@ -13,39 +13,43 @@ import Locations from './pages/Locations';
 function AppContent() {
   const location = useLocation();
   const navigate = useNavigate();
+  const appSearch = location.search;
+
+  const appUrl = (path: string) => `${path}${appSearch}`;
+  const handleNavigate = (path: string) => navigate(appUrl(path));
 
   const navigationMarkup = (
     <Navigation location={location.pathname}>
       <Navigation.Section
         items={[
           {
-            url: '/',
+            url: appUrl('/'),
             label: 'Dashboard',
-            onClick: () => navigate('/'),
+            onClick: () => handleNavigate('/'),
             selected: location.pathname === '/',
           },
           {
-            url: '/bookings',
+            url: appUrl('/bookings'),
             label: 'Bookings',
-            onClick: () => navigate('/bookings'),
+            onClick: () => handleNavigate('/bookings'),
             selected: location.pathname === '/bookings',
           },
           {
-            url: '/inventory',
+            url: appUrl('/inventory'),
             label: 'Inventory',
-            onClick: () => navigate('/inventory'),
+            onClick: () => handleNavigate('/inventory'),
             selected: location.pathname === '/inventory',
           },
           {
-            url: '/products',
+            url: appUrl('/products'),
             label: 'Products',
-            onClick: () => navigate('/products'),
+            onClick: () => handleNavigate('/products'),
             selected: location.pathname === '/products',
           },
           {
-            url: '/locations',
+            url: appUrl('/locations'),
             label: 'Locations',
-            onClick: () => navigate('/locations'),
+            onClick: () => handleNavigate('/locations'),
             selected: location.pathname === '/locations',
           },
         ]}
@@ -83,4 +87,3 @@ function App() {
 }
 
 export default App;
-

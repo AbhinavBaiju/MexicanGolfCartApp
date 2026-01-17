@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
     Page,
     Layout,
@@ -46,6 +47,10 @@ export default function Dashboard() {
     const fetchAuth = useAuthenticatedFetch();
     const fetchRef = useRef(fetchAuth);
     fetchRef.current = fetchAuth;
+
+    const location = useLocation();
+    const appSearch = location.search;
+    const appUrl = useCallback((path: string) => `${path}${appSearch}`, [appSearch]);
 
     const [data, setData] = useState<DashboardData | null>(null);
     const [loading, setLoading] = useState(true);
@@ -136,7 +141,7 @@ export default function Dashboard() {
                                 ) : (
                                     <BlockStack gap="200">
                                         {todayActivity.pickups.map(b => (
-                                            <BookingRow key={b.booking_token} booking={b} type="pickup" />
+                                            <BookingRow key={b.booking_token} booking={b} type="pickup" appUrl={appUrl} />
                                         ))}
                                     </BlockStack>
                                 )}
@@ -154,7 +159,7 @@ export default function Dashboard() {
                                 ) : (
                                     <BlockStack gap="200">
                                         {todayActivity.dropoffs.map(b => (
-                                            <BookingRow key={b.booking_token} booking={b} type="dropoff" />
+                                            <BookingRow key={b.booking_token} booking={b} type="dropoff" appUrl={appUrl} />
                                         ))}
                                     </BlockStack>
                                 )}
@@ -176,7 +181,7 @@ export default function Dashboard() {
                                         rows={upcomingBookings.map(b => [
                                             `${b.start_date} - ${b.end_date}`,
                                             b.location_code,
-                                            <Link key={b.booking_token} url={`/bookings/${b.booking_token}`}>{b.booking_token.slice(0, 8)}...</Link>,
+                                            <Link key={b.booking_token} url={appUrl(`/bookings/${b.booking_token}`)}>{b.booking_token.slice(0, 8)}...</Link>,
                                             <StatusBadge key={`status-${b.booking_token}`} status={b.status} />
                                         ])}
                                     />
@@ -198,7 +203,7 @@ export default function Dashboard() {
                                         headings={['Created At', 'Token', 'Date Range', 'Status', 'Notes']}
                                         rows={recentHistory.map(b => [
                                             new Date(b.created_at || '').toLocaleDateString() + ' ' + new Date(b.created_at || '').toLocaleTimeString(),
-                                            <Link key={b.booking_token} url={`/bookings/${b.booking_token}`}>{b.booking_token.slice(0, 8)}...</Link>,
+                                            <Link key={b.booking_token} url={appUrl(`/bookings/${b.booking_token}`)}>{b.booking_token.slice(0, 8)}...</Link>,
                                             `${b.start_date} -> ${b.end_date}`,
                                             <StatusBadge key={`status-${b.booking_token}`} status={b.status} />,
                                             b.invalid_reason || '-'
@@ -225,10 +230,18 @@ function StatCard({ title, value, tone }: { title: string, value: number, tone?:
     );
 }
 
-function BookingRow({ booking, type }: { booking: BookingSummary, type: 'pickup' | 'dropoff' }) {
+function BookingRow({
+    booking,
+    type,
+    appUrl
+}: {
+    booking: BookingSummary;
+    type: 'pickup' | 'dropoff';
+    appUrl: (path: string) => string;
+}) {
     return (
         <InlineGrid columns={['oneThird', 'twoThirds']} alignItems="center">
-            <Link url={`/bookings/${booking.booking_token}`}>{booking.booking_token.slice(0, 8)}...</Link>
+            <Link url={appUrl(`/bookings/${booking.booking_token}`)}>{booking.booking_token.slice(0, 8)}...</Link>
             <BlockStack>
                 <Text as="span" variant="bodySm">{booking.location_code}</Text>
                 <Text as="span" variant="bodyXs" tone="subdued">{type === 'pickup' ? 'Pickup' : 'Dropoff'}</Text>

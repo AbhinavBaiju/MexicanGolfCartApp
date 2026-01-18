@@ -7,6 +7,7 @@ The admin app is hosted on Cloudflare Pages. Since there is no automatic deploym
 - Node.js and npm installed.
 - Cloudflare `wrangler` CLI authenticated (use `npx wrangler login` if needed).
 - Shopify CLI installed (or use `npx shopify`).
+- **CRITICAL**: The `apps/admin/.env` file must exist locally with `VITE_SHOPIFY_API_KEY` set. This file is gitignored and required for the build to embed the Shopify API key.
 
 ## Deployment Steps
 

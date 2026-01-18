@@ -6,22 +6,43 @@ import {
     InlineStack,
     Box,
     Text,
-    Banner,
-    Select,
     TextField,
     Card,
     Spinner,
-    Badge,
-    BlockStack
 } from '@shopify/polaris';
 import { SearchIcon, ExportIcon, ArrowUpIcon, PlusIcon } from '@shopify/polaris-icons';
 import { DashboardStats } from '../components/DashboardStats';
-import { DashboardChart } from '../components/DashboardChart';
+import { ProductInventory } from '../components/ProductInventory';
 import { BookingsCalendar } from '../components/BookingsCalendar';
 import { useEffect, useState, useCallback } from 'react';
 import { useAuthenticatedFetch } from '../api';
 import type { Booking } from '../components/BookingCard';
 import { BookingCard } from '../components/BookingCard';
+
+const DASHBOARD_STYLES = `
+    .full-height-card-wrapper {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        width: 100%;
+    }
+    .full-height-card-wrapper .Polaris-Card {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+    }
+    .full-height-card-wrapper .Polaris-Card .Polaris-Box {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+    }
+    /* Target common Polaris inner containers to ensure they stretch */
+    .full-height-card-wrapper .Polaris-Card .Polaris-BlockStack,
+    .full-height-card-wrapper .Polaris-Card .Polaris-InlineStack {
+        flex: 1;
+    }
+`;
 
 export default function Dashboard() {
     const fetch = useAuthenticatedFetch();
@@ -85,6 +106,7 @@ export default function Dashboard() {
 
     return (
         <Page fullWidth>
+            <style dangerouslySetInnerHTML={{ __html: DASHBOARD_STYLES }} />
             {/* Header Section */}
             <div style={{ marginBottom: '20px' }}>
                 <InlineStack align="space-between" blockAlign="center">
@@ -96,42 +118,6 @@ export default function Dashboard() {
                 </InlineStack>
             </div>
 
-            {/* Config / Info Section */}
-            <div style={{ marginBottom: '20px' }}>
-                <Card>
-                    <Box padding="400">
-                        <InlineStack align="space-between" blockAlign="center">
-                            <InlineStack gap="400" blockAlign="center">
-                                <Text as="span" fontWeight="bold">Cowlandar is</Text>
-                                <Badge tone="success">enabled</Badge>
-                                <Text as="span">Language:</Text>
-                                <div style={{ width: 80 }}>
-                                    <Select
-                                        label="Language"
-                                        labelHidden
-                                        options={[{ label: '🇺🇸', value: 'us' }]}
-                                        onChange={() => { }}
-                                        value="us"
-                                    />
-                                </div>
-                            </InlineStack>
-                            <InlineStack gap="200">
-                                <Button>Vote for next features</Button>
-                                <Button>Read recent app updates</Button>
-                                <Button>Disable</Button>
-                            </InlineStack>
-                        </InlineStack>
-                    </Box>
-                </Card>
-                <div style={{ marginTop: '12px' }}>
-                    <Banner tone="warning">
-                        <InlineStack align="space-between" blockAlign="center">
-                            <Text as="p"><span style={{ marginRight: '8px' }}>📷</span> Cowlandar enabled on your website <strong>Off</strong></Text>
-                            <Button>Manage Cowlandar status</Button>
-                        </InlineStack>
-                    </Banner>
-                </div>
-            </div>
 
             {/* Filters */}
             <div style={{ marginBottom: '20px' }}>
@@ -141,20 +127,29 @@ export default function Dashboard() {
                 </InlineStack>
             </div>
 
-            <Layout>
+            {/* Dashboard Grid Section */}
+            <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))',
+                gap: '20px',
+                alignItems: 'stretch',
+                marginBottom: '20px'
+            }}>
                 {/* Left Column: Stats + Chart */}
-                <Layout.Section variant="oneHalf">
-                    <BlockStack gap="500">
-                        <DashboardStats stats={stats} />
-                        <DashboardChart bookings={bookings} />
-                    </BlockStack>
-                </Layout.Section>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                    <DashboardStats stats={stats} />
+                    <div className="full-height-card-wrapper" style={{ flex: 1 }}>
+                        <ProductInventory />
+                    </div>
+                </div>
 
                 {/* Right Column: Calendar */}
-                <Layout.Section variant="oneHalf">
+                <div className="full-height-card-wrapper">
                     <BookingsCalendar bookings={bookings} />
-                </Layout.Section>
+                </div>
+            </div>
 
+            <Layout>
                 {/* Upcoming Bookings Section */}
                 <Layout.Section>
                     <div style={{ marginTop: '20px' }}>

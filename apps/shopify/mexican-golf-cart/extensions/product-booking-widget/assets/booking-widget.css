@@ -1,3 +1,8 @@
+/* ============================================
+   MEXICAN GOLF CARTS - BOOKING WIDGET STYLES
+   Matches Shopify homepage "white container" design
+   ============================================ */
+
 :root {
   --gc-color-primary: #C8102E;
   --gc-color-primary-hover: #A00C24;
@@ -6,7 +11,7 @@
   --gc-color-text-input: #111111;
   --gc-color-border: #E5E5E5;
   --gc-color-focus-ring: #007AFF;
-  --gc-radius-container: 20px;
+  --gc-radius-container: 24px;
   --gc-radius-input: 12px;
   --gc-spacing-unit: 16px;
   --gc-font-family: inherit;
@@ -16,26 +21,113 @@
   --gc-color-timer-text: #E65100;
 }
 
-.gc-booking-widget {
-  background-color: #FFFFFF;
-  border-radius: var(--gc-radius-container);
-  padding: 32px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
-  font-family: var(--gc-font-family);
-  max-width: 100%;
+/* ============================================
+   WHITE CARD SECTION LAYOUT
+   ============================================ */
+
+.mgc-white-card-section {
+  padding: 36px 0;
+}
+
+.booking-outer-wrapper {
+  max-width: 1400px;
   margin: 0 auto;
+  padding: 0;
+}
+
+.booking-container {
+  background: #FFFFFF;
+  border-radius: 50px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+  height: 500px;
+  width: 100%;
+  padding: 28px;
+  box-sizing: border-box;
+}
+
+.mgc-white-card__title {
+  margin: 0 0 24px 0;
+  font-size: 28px;
+  line-height: 1.2;
+  font-weight: 700;
+  color: #0b0b0b;
+  text-align: center;
+}
+
+/* ============================================
+   4 STEPS GRID
+   ============================================ */
+
+.mgc-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 18px;
+  margin-bottom: 28px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.mgc-step {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.mgc-step__icon {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--gc-color-primary);
+}
+
+.mgc-step__icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.mgc-step__text {
+  flex: 1;
+}
+
+.mgc-step__headline {
+  font-weight: 700;
+  font-size: 15px;
+  line-height: 1.25;
+  color: #0b0b0b;
+}
+
+.mgc-step__sub {
+  margin-top: 2px;
+  font-weight: 600;
+  font-size: 13px;
+  color: rgba(11, 11, 11, 0.65);
+}
+
+/* ============================================
+   BOOKING SLOT (Form Container)
+   ============================================ */
+
+.mgc-booking-slot {
+  margin-top: 8px;
+}
+
+/* ============================================
+   BOOKING FORM STYLES
+   ============================================ */
+
+.gc-booking-form {
+  max-width: 100%;
 }
 
 .gc-form-grid {
   display: grid;
   gap: 20px;
-}
-
-/* 50% width on desktop as requested, centered */
-@media (min-width: 768px) {
-  .gc-booking-widget {
-    width: 50%;
-  }
 }
 
 .gc-input-group {
@@ -46,7 +138,7 @@
 
 .gc-label {
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--gc-color-text-label);
   margin-left: 4px;
 }
@@ -72,7 +164,6 @@
   width: 100%;
   height: 56px;
   padding: 0 16px 0 48px;
-  /* Left padding for icon */
   background-color: var(--gc-color-input-bg);
   border: 1px solid var(--gc-color-border);
   border-radius: var(--gc-radius-input);
@@ -114,13 +205,10 @@
   gap: 12px;
 }
 
-@media (max-width: 480px) {
-  .gc-date-range {
-    grid-template-columns: 1fr;
-  }
-}
+/* ============================================
+   ACTION BUTTON
+   ============================================ */
 
-/* Action Button */
 .gc-submit-btn {
   width: 100%;
   height: 56px;
@@ -131,7 +219,7 @@
   font-size: 16px;
   font-weight: 700;
   cursor: pointer;
-  transition: background-color 0.2s;
+  transition: all 0.2s ease;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -140,19 +228,30 @@
 
 .gc-submit-btn:hover {
   background-color: var(--gc-color-primary-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(200, 16, 46, 0.3);
+}
+
+.gc-submit-btn:active {
+  transform: translateY(0);
 }
 
 .gc-submit-btn:disabled {
   background-color: #ccc;
   cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
-/* Status Messages */
+/* ============================================
+   STATUS MESSAGES
+   ============================================ */
+
 .gc-status-message {
   font-size: 14px;
   font-weight: 500;
   min-height: 20px;
-  margin-bottom: -10px;
+  text-align: center;
 }
 
 .gc-status-error {
@@ -168,13 +267,15 @@
   font-style: italic;
 }
 
-/* Countdown Timer */
+/* ============================================
+   COUNTDOWN TIMER
+   ============================================ */
+
 #gc-timer-container {
   background-color: var(--gc-color-timer-bg);
   color: var(--gc-color-timer-text);
   padding: 12px;
   border-radius: var(--gc-radius-input);
-  margin-bottom: 16px;
   font-size: 14px;
   font-weight: 600;
   display: flex;
@@ -184,7 +285,10 @@
   border: 1px solid #FFE0B2;
 }
 
-/* Error State */
+/* ============================================
+   ERROR STATE
+   ============================================ */
+
 .gc-error-state {
   text-align: center;
   padding: 24px 0;
@@ -198,4 +302,98 @@
 .gc-error-state .gc-submit-btn {
   margin-top: 0;
   background-color: #333;
+}
+
+/* ============================================
+   RESPONSIVE BREAKPOINTS
+   ============================================ */
+
+/* Tablet: 2-column steps grid */
+@media (max-width: 980px) {
+  .mgc-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  .mgc-white-card__title {
+    font-size: 24px;
+  }
+}
+
+/* Mobile: 1-column layout */
+@media (max-width: 560px) {
+  .mgc-white-card-section {
+    padding: 27px 0;
+  }
+
+  .booking-outer-wrapper {
+    padding: 0;
+  }
+
+  .booking-container {
+    padding: 20px;
+    border-radius: 50px;
+    /* Keeping 50px or slightly reduced? User said 50px */
+    height: auto;
+    /* Allow auto height on mobile to prevent overflow */
+    min-height: 500px;
+  }
+
+  .mgc-white-card__title {
+    font-size: 22px;
+    margin-bottom: 20px;
+  }
+
+  .mgc-steps {
+    grid-template-columns: 1fr;
+    gap: 14px;
+    margin-bottom: 22px;
+    padding-bottom: 18px;
+  }
+
+  .mgc-step__icon {
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+  }
+
+  .mgc-step__icon svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .mgc-step__headline {
+    font-size: 14px;
+  }
+
+  .mgc-step__sub {
+    font-size: 12px;
+  }
+
+  .gc-date-range {
+    grid-template-columns: 1fr;
+  }
+
+  .gc-input,
+  .gc-select,
+  .gc-submit-btn {
+    height: 52px;
+  }
+}
+
+/* Very small screens */
+@media (max-width: 380px) {
+  .booking-outer-wrapper {
+    padding: 0;
+  }
+
+  .booking-container {
+    padding: 16px;
+    border-radius: 40px;
+    min-height: 500px;
+  }
+
+  .mgc-white-card__title {
+    font-size: 20px;
+  }
 }

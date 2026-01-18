@@ -13,7 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
             quantity: form.querySelector('[name="booking_quantity"]'),
             submitBtn: form.querySelector('.gc-submit-btn'),
             statusMsg: form.querySelector('.gc-status-message'),
-            container: form.closest('.gc-booking-widget'),
+            container: form.closest('.booking-container'),
             timerContainer: form.querySelector('#gc-timer-container'),
             timerText: form.querySelector('#gc-timer-text'),
             errorState: document.querySelector('.gc-error-state') // Global or scoped if inside widget

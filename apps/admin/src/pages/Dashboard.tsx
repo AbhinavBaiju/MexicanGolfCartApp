@@ -9,14 +9,80 @@ import {
     Banner,
     Select,
     TextField,
-    Card
+    Card,
+    Spinner,
+    Badge,
+    BlockStack
 } from '@shopify/polaris';
-import { SearchIcon, ExportIcon, ArrowUpIcon } from '@shopify/polaris-icons';
+import { SearchIcon, ExportIcon, ArrowUpIcon, PlusIcon } from '@shopify/polaris-icons';
 import { DashboardStats } from '../components/DashboardStats';
 import { DashboardChart } from '../components/DashboardChart';
 import { BookingsCalendar } from '../components/BookingsCalendar';
+import { useEffect, useState, useCallback } from 'react';
+import { useAuthenticatedFetch } from '../api';
+import type { Booking } from '../components/BookingCard';
+import { BookingCard } from '../components/BookingCard';
 
 export default function Dashboard() {
+    const fetch = useAuthenticatedFetch();
+    const [bookings, setBookings] = useState<Booking[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [stats, setStats] = useState({
+        revenue: 0,
+        bookingsCount: 0,
+        cancelledCount: 0,
+        views: 0
+    });
+    const [searchQuery, setSearchQuery] = useState('');
+
+    const loadData = useCallback(async () => {
+        setLoading(true);
+        try {
+            // Fetch all bookings for stats (simplified: fetching all might be heavy in prod, but ok for now)
+            // In a real app we might want a dedicated stats endpoint.
+            const response = await fetch('/bookings');
+            if (response.ok) {
+                const data = await response.json();
+                const fetchedBookings: Booking[] = data.bookings || [];
+                setBookings(fetchedBookings);
+
+                // Calculate stats
+                const confirmed = fetchedBookings.filter(b => b.status === 'CONFIRMED');
+                const cancelled = fetchedBookings.filter(b => b.status === 'CANCELLED');
+                // Mock revenue logic as no price in Booking type yet
+                const revenue = confirmed.reduce((acc, b) => acc + (b.order_id ? 100 : 0), 0);
+
+                setStats({
+                    revenue,
+                    bookingsCount: confirmed.length,
+                    cancelledCount: cancelled.length,
+                    views: 0 // Mocked
+                });
+            }
+        } catch (error) {
+            console.error('Error fetching dashboard data:', error);
+        } finally {
+            setLoading(false);
+        }
+    }, [fetch]);
+
+    useEffect(() => {
+        loadData();
+    }, [loadData]);
+
+    const upcomingBookings = bookings.filter(b => {
+        if (b.status !== 'CONFIRMED') return false;
+        const bookingDate = new Date(b.start_date); // Assuming start_date
+        return bookingDate >= new Date();
+    });
+
+    const filteredUpcoming = upcomingBookings.filter(b => {
+        if (!searchQuery) return true;
+        const q = searchQuery.toLowerCase();
+        return b.booking_token?.toLowerCase().includes(q) ||
+            b.location_code?.toLowerCase().includes(q);
+    });
+
     return (
         <Page fullWidth>
             {/* Header Section */}
@@ -25,7 +91,7 @@ export default function Dashboard() {
                     <Text as="h1" variant="headingLg">Dashboard</Text>
                     <ButtonGroup>
                         <Button>FAQ</Button>
-                        <Button variant="primary" icon={<span style={{ fontSize: '16px' }}>+</span>}>New service</Button>
+                        <Button variant="primary" icon={PlusIcon}>New service</Button>
                     </ButtonGroup>
                 </InlineStack>
             </div>
@@ -37,12 +103,16 @@ export default function Dashboard() {
                         <InlineStack align="space-between" blockAlign="center">
                             <InlineStack gap="400" blockAlign="center">
                                 <Text as="span" fontWeight="bold">Cowlandar is</Text>
-                                <div style={{ background: '#c1f3d3', color: '#0d5428', padding: '2px 8px', borderRadius: '4px', fontWeight: 600, fontSize: '12px' }}>
-                                    enabled
-                                </div>
+                                <Badge tone="success">enabled</Badge>
                                 <Text as="span">Language:</Text>
                                 <div style={{ width: 80 }}>
-                                    <Select label="Language" labelHidden options={[{ label: '🇺🇸', value: 'us' }]} onChange={() => { }} value="us" />
+                                    <Select
+                                        label="Language"
+                                        labelHidden
+                                        options={[{ label: '🇺🇸', value: 'us' }]}
+                                        onChange={() => { }}
+                                        value="us"
+                                    />
                                 </div>
                             </InlineStack>
                             <InlineStack gap="200">
@@ -72,63 +142,85 @@ export default function Dashboard() {
             </div>
 
             <Layout>
-                {/* Stats Row */}
-                <Layout.Section>
-                    <DashboardStats />
+                {/* Left Column: Stats + Chart */}
+                <Layout.Section variant="oneHalf">
+                    <BlockStack gap="500">
+                        <DashboardStats stats={stats} />
+                        <DashboardChart bookings={bookings} />
+                    </BlockStack>
                 </Layout.Section>
 
-                {/* Chart Row */}
-                <Layout.Section>
-                    <DashboardChart />
+                {/* Right Column: Calendar */}
+                <Layout.Section variant="oneHalf">
+                    <BookingsCalendar bookings={bookings} />
                 </Layout.Section>
 
-                {/* Calendar Section */}
-                <Layout.Section>
-                    <BookingsCalendar />
-                </Layout.Section>
-
-                {/* Upcoming Bookings Section (Bottom of Image 1) */}
+                {/* Upcoming Bookings Section */}
                 <Layout.Section>
                     <div style={{ marginTop: '20px' }}>
                         <InlineStack gap="200" align="center" blockAlign="center">
                             <Text as="h2" variant="headingMd">Upcoming bookings</Text>
-                            <div style={{ background: '#e4e5e7', color: 'black', borderRadius: '12px', padding: '0 8px', fontSize: '12px', fontWeight: 'bold' }}>0</div>
+                            <div style={{ background: '#e4e5e7', color: 'black', borderRadius: '12px', padding: '0 8px', fontSize: '12px', fontWeight: 'bold' }}>
+                                {upcomingBookings.length}
+                            </div>
                         </InlineStack>
 
                         <div style={{ marginTop: '16px' }}>
                             <Card>
                                 <Box padding="400">
-                                    {/* Search Bar matching Image 1 */}
+                                    {/* Search Bar */}
                                     <div style={{ marginBottom: '16px' }}>
                                         <TextField
                                             label="Search"
                                             labelHidden
                                             placeholder="Filter by customer name or email"
-                                            value=""
-                                            onChange={() => { }}
+                                            value={searchQuery}
+                                            onChange={setSearchQuery}
                                             autoComplete="off"
+                                            prefix={<SearchIcon />}
                                         />
                                     </div>
 
-                                    {/* Filter Buttons */}
-                                    <InlineStack gap="200" align="start">
-                                        <Button icon={<span style={{ marginRight: 4 }}>📅</span>}>Upcoming</Button>
-                                        <Button disclosure>All services</Button>
-                                        <Button disclosure>All teammates</Button>
-                                        <Button disclosure>All types</Button>
-                                        <Button disclosure>All statuses</Button>
-                                        <Button disclosure>Upsell</Button>
-                                        <Button icon={ArrowUpIcon} />
-                                        <Button icon={ExportIcon}>Export</Button>
-                                    </InlineStack>
-
-                                    {/* Empty State */}
-                                    <div style={{ padding: '60px 0', textAlign: 'center' }}>
-                                        <SearchIcon style={{ width: 60, height: 60, color: '#8c9196', margin: '0 auto' }} />
-                                        <div style={{ height: 16 }} />
-                                        <Text as="h3" variant="headingMd">No bookings found</Text>
-                                        <Text as="p" tone="subdued">Try changing the filters or search term</Text>
+                                    {/* Create Filter Buttons Row */}
+                                    <div style={{ marginBottom: '16px' }}>
+                                        <InlineStack gap="200" align="start">
+                                            <Button icon={<span style={{ marginRight: 4 }}>📅</span>}>Upcoming</Button>
+                                            <Button disclosure>All services</Button>
+                                            <Button disclosure>All teammates</Button>
+                                            <Button disclosure>All types</Button>
+                                            <Button disclosure>All statuses</Button>
+                                            <Button disclosure>Upsell</Button>
+                                            <Button icon={ArrowUpIcon} />
+                                            <Button icon={ExportIcon}>Export</Button>
+                                        </InlineStack>
                                     </div>
+
+                                    {/* Content */}
+                                    {loading ? (
+                                        <Box padding="1600">
+                                            <InlineStack align="center"><Spinner size="large" /></InlineStack>
+                                        </Box>
+                                    ) : filteredUpcoming.length === 0 ? (
+                                        <div style={{ padding: '60px 0', textAlign: 'center' }}>
+                                            <SearchIcon style={{ width: 60, height: 60, color: '#8c9196', margin: '0 auto', display: 'block' }} />
+                                            <div style={{ height: 16 }} />
+                                            <Text as="h3" variant="headingMd">No bookings found</Text>
+                                            <Text as="p" tone="subdued">Try changing the filters or search term</Text>
+                                        </div>
+                                    ) : (
+                                        <div>
+                                            {filteredUpcoming.slice(0, 5).map(booking => (
+                                                <BookingCard key={booking.booking_token} booking={booking} />
+                                            ))}
+                                            {filteredUpcoming.length > 5 && (
+                                                <Box padding="400">
+                                                    <InlineStack align="center">
+                                                        <Button variant="plain">View all upcoming bookings</Button>
+                                                    </InlineStack>
+                                                </Box>
+                                            )}
+                                        </div>
+                                    )}
                                 </Box>
                             </Card>
                         </div>

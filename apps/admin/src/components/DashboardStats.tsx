@@ -31,17 +31,32 @@ function StatItem({ title, value, percentage, trend = 'up' }: StatProps) {
     );
 }
 
-export function DashboardStats() {
-    // Mock data based on screenshot
+interface DashboardStatsProps {
+    stats: {
+        revenue: number;
+        bookingsCount: number;
+        cancelledCount: number;
+        views: number;
+    };
+}
+
+export function DashboardStats({ stats }: DashboardStatsProps) {
+    // Format currency
+    const formatCurrency = (val: number) => {
+        return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
+    };
+
     return (
         <Card>
-            <InlineGrid columns={4} gap="400">
-                <StatItem title="Revenue" value="$ 0.00" percentage="0%" />
-                <StatItem title="Bookings" value="0" percentage="0%" />
-                <StatItem title="Cancelled bookings" value="0" percentage="0%" />
-                {/* Views has a tooltip/dropdown in screenshot, ignoring for now */}
-                <StatItem title="Views" value="0" percentage="0%" />
-            </InlineGrid>
+            <Box padding="400">
+                <InlineGrid columns={4} gap="400">
+                    <StatItem title="Revenue" value={formatCurrency(stats.revenue)} percentage="0%" />
+                    <StatItem title="Bookings" value={stats.bookingsCount.toString()} percentage="0%" />
+                    <StatItem title="Cancelled bookings" value={stats.cancelledCount.toString()} percentage="0%" />
+                    {/* Views has a tooltip/dropdown in screenshot, ignoring for now */}
+                    <StatItem title="Views" value={stats.views.toString()} percentage="0%" />
+                </InlineGrid>
+            </Box>
         </Card>
     );
 }

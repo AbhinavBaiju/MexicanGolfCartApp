@@ -11,12 +11,21 @@ document.addEventListener('DOMContentLoaded', () => {
             end: form.querySelector('[name="booking_end_date"]'),
             location: form.querySelector('[name="booking_location"]'),
             quantity: form.querySelector('[name="booking_quantity"]'),
+            qtyMinus: form.querySelector('.gc-qty-minus'),
+            qtyPlus: form.querySelector('.gc-qty-plus'),
             submitBtn: form.querySelector('.gc-submit-btn'),
             statusMsg: form.querySelector('.gc-status-message'),
             container: form.closest('.booking-container'),
             timerContainer: form.querySelector('#gc-timer-container'),
             timerText: form.querySelector('#gc-timer-text'),
-            errorState: document.querySelector('.gc-error-state') // Global or scoped if inside widget
+            errorState: document.querySelector('.gc-error-state'), // Global or scoped if inside widget
+
+            // New Elements
+            fulfillmentRadios: form.querySelectorAll('input[name="fulfillment_type"]'),
+            pickupDetails: form.querySelector('.gc-pickup-details'),
+            deliveryDetails: form.querySelector('.gc-delivery-details'),
+            deliveryAddress: form.querySelector('[name="delivery_address"]'),
+            addressText: form.querySelector('.gc-address-text')
         };
 
         const productId = form.dataset.productId;
@@ -29,17 +38,156 @@ document.addEventListener('DOMContentLoaded', () => {
         const API_BASE = elements.container.dataset.apiBase || '/apps/rental'; // Fallback
 
         // Initialize
-        if (!productId || !elements.location) return;
+        if (!elements.location) return;
         init();
 
         function init() {
-            setMinDates();
+            // setMinDates(); // Replaced by Flatpickr
+            initDatePickers();
             fetchLocations();
             attachListeners();
 
             // Release on abandon
             window.addEventListener('pagehide', handleAbandon);
             // Also handle visibility change as backup? pagehide is better for unload.
+        }
+
+        function initDatePickers() {
+            // Wait for Flatpickr and Plugin to load
+            if (typeof flatpickr === 'undefined') {
+                console.warn('Flatpickr not loaded');
+                return;
+            }
+
+            // Ensure we have both inputs
+            if (!elements.start || !elements.end) return;
+
+            // Mark inputs as readonly effectively (handled by flatpickr, but good to be sure)
+            elements.start.setAttribute('readonly', 'readonly');
+            elements.end.setAttribute('readonly', 'readonly');
+
+            // Unique ID for mapping if needed (not strictly necessary with direct el reference)
+            // elements.end.id = 'booking_end_date';
+
+            // Determine months based on container width
+            const containerWidth = form.offsetWidth;
+            const showMonths = (containerWidth > 620 && window.innerWidth >= 768) ? 2 : 1;
+
+            const pickerConfig = {
+                mode: 'range',
+                disableMobile: true,
+                showMonths: showMonths,
+                minDate: "today",
+                dateFormat: "Y-m-d",
+                altInput: true,
+                altFormat: "M j, Y",
+                // Remove appendTo: form to fix positioning issues (renders in body by default)
+
+                plugins: [new rangePlugin({ input: elements.end })],
+
+                onOpen: function (selectedDates, dateStr, instance) {
+                    if (instance.calendarContainer) {
+                        // Align to the specific date-range container or the whole form?
+                        // User request: "same width as the input boxes's vertical spacing (total)"
+                        // This implies matching the .gc-date-range container width.
+                        const targetContainer = form.querySelector('.gc-date-range') || form;
+
+                        const updatePosition = () => {
+                            if (!instance.calendarContainer) return;
+
+                            const rect = targetContainer.getBoundingClientRect();
+                            const docScrollTop = window.scrollY || document.documentElement.scrollTop;
+                            const docScrollLeft = window.scrollX || document.documentElement.scrollLeft;
+
+                            // Force exact width of the input group
+                            instance.calendarContainer.style.width = `${rect.width}px`;
+
+                            // Align perfectly with left edge
+                            instance.calendarContainer.style.left = `${rect.left + docScrollLeft}px`;
+
+                            // Ensure it's just below
+                            // instance.calendarContainer.style.top = `${rect.bottom + docScrollTop + 10}px`; 
+                            // Flatpickr handles top automatically usually, but we can enforce if needed.
+                        };
+
+                        updatePosition();
+
+                        // Small delay to override any internal Flatpickr recalcs
+                        requestAnimationFrame(updatePosition);
+
+                        // Add class for styling hooks
+                        instance.calendarContainer.classList.add('mgc-custom-calendar');
+                    }
+                },
+
+                onValueUpdate: function (d, s, instance) {
+                    // Keep aligned on value updates if needed
+                    // if(instance.calendarContainer) { ... }
+                },
+
+                onValueUpdate: function (d, s, instance) {
+                    // Keep aligned on value updates if needed
+                    if (instance.calendarContainer) {
+                        const currentFormRect = form.getBoundingClientRect();
+                        const docScrollLeft = window.scrollX || document.documentElement.scrollLeft;
+                        instance.calendarContainer.style.left = `${currentFormRect.left + docScrollLeft}px`;
+                    }
+                },
+
+                onChange: function (selectedDates, dateStr, instance) {
+                    // Constraint: Minimum 1 day range (Start != End)
+                    if (selectedDates.length === 2) {
+                        const start = selectedDates[0];
+                        const end = selectedDates[1];
+
+                        if (start.getTime() === end.getTime()) {
+                            // If user picked the same day twice, clear/reset or just clear the end date?
+                            // Flatpickr range mode often handles "click same day twice" as "unselect".
+                            // But if they select range start==end, we want to forbid it.
+                            // However, in range mode, usually you click once for start, mouseover defines range, click again for end.
+                            // If you click the same date twice, it becomes a 1-day range.
+
+                            // We will clear the selection if it's the same day to force re-selection or valid range.
+                            // Or better: set the date to just start and keep picker open? 
+                            // Unfortunately programmatic open inside onChange can be glitchy.
+
+                            // Let's validate downstream first: debouncedCheckAvailability handles checks.
+                            // If we enforce it here, we might annoy users.
+                            // But user said: "not the same day". 
+
+                            // Let's clear the end date if it matches start.
+                            // Actually, with rangePlugin, dateStr is the range string "start to end" or similar in internal value?
+                            // No, rangePlugin puts separate values in inputs.
+                        }
+                    }
+                    validateDates(); // Our existing logic can check dates too
+                    debouncedCheckAvailability();
+                }
+            };
+
+            // Initialize on Start Input
+            elements.startPicker = flatpickr(elements.start, pickerConfig);
+
+            // Allow clicking end input to open the same picker
+            // (RangePlugin usually handles this)
+
+            // Dynamic Resizing support
+            window.addEventListener('resize', () => {
+                if (elements.startPicker && elements.startPicker.isOpen) {
+                    elements.startPicker.redraw();
+                    // Manually trigger our positioning logic if we extracted it, 
+                    // or rely on flatpickr's redraw + our onOpen (which fires on redraw?) - No, redraw doesn't fire onOpen.
+                    // We need to re-run the positioning logic.
+                    const instance = elements.startPicker;
+                    if (instance.calendarContainer) {
+                        const targetContainer = form.querySelector('.gc-date-range') || form;
+                        const rect = targetContainer.getBoundingClientRect();
+                        const docScrollLeft = window.scrollX || document.documentElement.scrollLeft;
+                        instance.calendarContainer.style.width = `${rect.width}px`;
+                        instance.calendarContainer.style.left = `${rect.left + docScrollLeft}px`;
+                    }
+                }
+            });
         }
 
         function handleAbandon() {
@@ -72,6 +220,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         option.textContent = loc.name;
                         elements.location.appendChild(option);
                     });
+                    // Initial update of address display
+                    if (updateAddressDisplay) updateAddressDisplay();
                 } else {
                     showFatalError();
                 }
@@ -104,17 +254,73 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
             });
 
+            // Quantity Stepper Logic
+            if (elements.qtyMinus && elements.qtyPlus && elements.quantity) {
+                const updateQuantity = (delta) => {
+                    let current = parseInt(elements.quantity.value) || 0;
+                    let min = parseInt(elements.quantity.min) || 1;
+                    let max = parseInt(elements.quantity.max) || 10;
+
+                    let next = current + delta;
+                    if (next < min) next = min;
+                    if (next > max) next = max;
+
+                    if (next !== current) {
+                        elements.quantity.value = next;
+                        elements.quantity.dispatchEvent(new Event('change'));
+                        elements.quantity.dispatchEvent(new Event('input'));
+                    }
+                };
+
+                elements.qtyMinus.addEventListener('click', (e) => { e.preventDefault(); updateQuantity(-1); });
+                elements.qtyPlus.addEventListener('click', (e) => { e.preventDefault(); updateQuantity(1); });
+            }
+
             form.addEventListener('submit', handleSubmit);
+
+            // Fulfillment Toggle
+            if (elements.fulfillmentRadios.length) {
+                elements.fulfillmentRadios.forEach(radio => {
+                    radio.addEventListener('change', (e) => {
+                        const isPickup = e.target.value === 'pickup';
+                        if (elements.pickupDetails) elements.pickupDetails.style.display = isPickup ? 'block' : 'none';
+                        if (elements.deliveryDetails) elements.deliveryDetails.style.display = isPickup ? 'none' : 'block';
+
+                        // Toggle required
+                        if (elements.deliveryAddress) {
+                            elements.deliveryAddress.required = !isPickup;
+                        }
+                    });
+                });
+            }
+
+            // Update Address Display
+            if (elements.location) {
+                elements.location.addEventListener('change', () => {
+                    updateAddressDisplay();
+                });
+            }
+        }
+
+        function updateAddressDisplay() {
+            if (!elements.location || !elements.addressText) return;
+            const selectedOption = elements.location.options[elements.location.selectedIndex];
+            if (selectedOption && selectedOption.value) {
+                // Determine address (mock/placeholder for now as it's not in DB)
+                // If we had a map of code -> address, we'd use it here.
+                // For now, use the name.
+                elements.addressText.textContent = `Pickup at: ${selectedOption.textContent}`;
+            } else {
+                elements.addressText.textContent = 'Select a location to see address';
+            }
         }
 
         function validateDates() {
-            if (elements.start.value && elements.end.value) {
-                if (elements.start.value > elements.end.value) {
-                    elements.end.value = elements.start.value;
-                }
-            }
-            if (elements.start.value && elements.end) {
-                elements.end.min = elements.start.value;
+            // Validation Logic compatible with range picker
+            if ((elements.start.value && elements.end.value) && (elements.start.value === elements.end.value)) {
+                // Prevent same day - if somehow selected
+                updateStatus('Minimum booking is 1 night (return next day)', 'error');
+                elements.submitBtn.disabled = true;
             }
         }
 
@@ -124,6 +330,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         async function checkAvailability() {
+            if (!productId) {
+                // updateStatus('Configuration missing: Select product in editor', 'error');
+                return;
+            }
+
             if (!elements.start.value || !elements.end.value || !elements.location.value || !elements.quantity.value) {
                 updateStatus('');
                 return;
@@ -218,9 +429,14 @@ document.addEventListener('DOMContentLoaded', () => {
                             quantity: parseInt(elements.quantity.value),
                             properties: {
                                 'booking_token': holdData.booking_token,
-                                'booking_start_date': elements.start.value,
-                                'booking_end_date': elements.end.value,
-                                'booking_location': elements.location.value
+                                'Start Date': elements.start.value,
+                                'End Date': elements.end.value,
+                                'Location': elements.location.options[elements.location.selectedIndex].text,
+                                'Location Code': elements.location.value,
+                                'Fulfillment Type': form.querySelector('input[name="fulfillment_type"]:checked').value === 'pickup' ? 'Pick Up' : 'Drop Off (Delivery)',
+                                ...(form.querySelector('input[name="fulfillment_type"]:checked').value === 'delivery' && elements.deliveryAddress && elements.deliveryAddress.value
+                                    ? { 'Delivery Address': elements.deliveryAddress.value }
+                                    : {})
                             }
                         }]
                     })

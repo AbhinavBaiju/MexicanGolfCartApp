@@ -1,117 +1,191 @@
 import { Page, Layout, LegacyCard, IndexTable, Text, Select, Button, Modal, TextField, FormLayout, InlineError, Badge, Grid, Card, BlockStack, InlineStack, Box, Divider } from '@shopify/polaris';
 import { useAuthenticatedFetch } from '../api';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 
-interface ProductInfo {
-    product_id: number;
-    title: string;
-    image?: string;
-    default_capacity: number;
-}
-
-interface ProductDefinition {
+// Shopify Product Type
+interface ShopifyProduct {
     id: number;
     title: string;
+    images: { src: string }[];
+    variants: { id: number; title: string }[];
+    status: string;
+}
+
+// Result from /admin/products (Config)
+interface ProductConfig {
+    product_id: number;
+    rentable: number;
+    default_capacity: number;
+    deposit_multiplier: number;
+    updated_at: string;
+}
+
+// Combined View Model
+interface ProductDefinition {
+    id: number; // Shopify Product ID
+    title: string;
     image: string;
-    price: string;
-    features: string;
-    totalAvailability: number;
+    price: string; // Not in DB yet, mock or fetch from Shopify variants?
+    features: string; // Not in DB, mock
+    totalAvailability: number; // default_capacity
     shopifyProductId: string;
+    isLinked: boolean;
 }
 
 interface InventoryDay {
     date: string;
-    capacity: number;
-    reserved_qty: number;
-    p1_capacity?: number;
-    p1_reserved?: number;
-    p2_capacity?: number;
-    p2_reserved?: number;
-    p3_capacity?: number;
-    p3_reserved?: number;
+    // Dynamic access by product_id
+    [key: number]: { capacity: number; reserved: number };
 }
-
-const INITIAL_PRODUCTS: ProductDefinition[] = [
-    { id: 1, title: 'Golf Cart - 4 Seater', image: 'https://images.unsplash.com/photo-1593100126453-19b562a80028?auto=format&fit=crop&q=80&w=300', price: '$80/day', features: 'Electric, canopy, 4 seats', totalAvailability: 10, shopifyProductId: '' },
-    { id: 2, title: 'Golf Cart - 6 Seater', image: 'https://images.unsplash.com/photo-1621946390176-75f850b69165?auto=format&fit=crop&q=80&w=300', price: '$120/day', features: 'High torque, long range, 6 seats', totalAvailability: 5, shopifyProductId: '' },
-    { id: 3, title: 'Off-Road Special', image: 'https://images.unsplash.com/photo-1541899481282-d53bffe3c35d?auto=format&fit=crop&q=80&w=300', price: '$150/day', features: 'Lifted, off-road tires, premium sound', totalAvailability: 3, shopifyProductId: '' },
-];
 
 export default function Inventory() {
     const fetch = useAuthenticatedFetch();
-    const [products, setProducts] = useState<ProductInfo[]>([]);
-    const [selectedProductId, setSelectedProductId] = useState<string>('');
-
-    const [productDefinitions, setProductDefinitions] = useState<ProductDefinition[]>(INITIAL_PRODUCTS);
+    
+    // Data States
+    const [shopifyProducts, setShopifyProducts] = useState<ShopifyProduct[]>([]);
+    const [productConfigs, setProductConfigs] = useState<ProductConfig[]>([]);
     const [inventory, setInventory] = useState<InventoryDay[]>([]);
-    const [, setLoading] = useState(false);
+    const [loading, setLoading] = useState(false);
+    
+    // View State
     const [dateRange, setDateRange] = useState({
         month: new Date().getMonth(),
         year: new Date().getFullYear()
     });
 
+    // Modals
     const [editModalOpen, setEditModalOpen] = useState(false);
-    const [editingDay, setEditingDay] = useState<InventoryDay | null>(null);
-    const [caps, setCaps] = useState({ p1: '', p2: '', p3: '' });
+    const [editingDay, setEditingDay] = useState<string | null>(null);
+    const [editingCaps, setEditingCaps] = useState<Record<number, string>>({}); // productId -> capacity string
 
-    // Product Settings State
     const [productSettingsModalOpen, setProductSettingsModalOpen] = useState(false);
-    const [editingProduct, setEditingProduct] = useState<ProductDefinition | null>(null);
-    const [tempProdTitle, setTempProdTitle] = useState('');
+    const [editingProductDiff, setEditingProductDiff] = useState<ProductDefinition | null>(null);
+    // Temp states for modal
     const [tempProdAvailability, setTempProdAvailability] = useState('');
     const [tempShopifyId, setTempShopifyId] = useState('');
 
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // Load shopify products for linking
+    // 1. Fetch Shopify Products & Configs on Mount
     useEffect(() => {
-        fetch('/products').then(async (res) => {
-            if (res.ok) {
-                const data = await res.json();
-                setProducts(data.products);
-                if (data.products.length > 0 && !selectedProductId) {
-                    setSelectedProductId(data.products[0].product_id.toString());
-                }
-            }
+        const loadInitial = async () => {
+             // Load Configs
+             const configRes = await fetch('/products');
+             if (configRes.ok) {
+                 const data = await configRes.json();
+                 setProductConfigs(data.products || []);
+             }
+
+             // Load Shopify Products
+             const shopifyRes = await fetch('/shopify-products');
+             if (shopifyRes.ok) {
+                 const data = await shopifyRes.json();
+                 setShopifyProducts(data.products || []);
+             }
+        };
+        loadInitial();
+    }, [fetch]);
+
+    // 2. Computed Product Definitions (Merged)
+    const productDefinitions = useMemo<ProductDefinition[]>(() => {
+        // If we have configs, show them.
+        // We also want to support "Slots" logic if needed, but dynamic is better.
+        // Let's map configs to definitions.
+        if (productConfigs.length === 0) {
+            // Return 3 empty slots if nothing configured so UI isn't empty?
+            // Or just allow "Add". User asked for "Link to Product #1".
+            // We'll show placeholders if empty, or mapped real ones.
+            return [1, 2, 3].map(i => ({
+                id: i * -1, // Negative ID for placeholder
+                title: `Slot #${i} (Empty)`,
+                image: '',
+                price: '-',
+                features: 'Link a Shopify Product',
+                totalAvailability: 0,
+                shopifyProductId: '',
+                isLinked: false
+            }));
+        }
+
+        return productConfigs.map(cfg => {
+            const sp = shopifyProducts.find(p => p.id === cfg.product_id);
+            return {
+                id: cfg.product_id,
+                title: sp ? sp.title : `Product ${cfg.product_id}`,
+                image: sp?.images?.[0]?.src || '',
+                price: '$-/day', // Helper to fetch variant price if needed
+                features: 'Standard features',
+                totalAvailability: cfg.default_capacity,
+                shopifyProductId: cfg.product_id.toString(),
+                isLinked: true
+            };
         });
-    }, [fetch, selectedProductId]);
+    }, [productConfigs, shopifyProducts]);
 
+    // 3. Load Inventory for Month based on productDefinitions
     const loadInventory = useCallback(async () => {
-        // We use selectedProductId as a driver for the API call to get some dates
-        const driverId = selectedProductId || (products.length > 0 ? products[0].product_id.toString() : '1');
-        setLoading(true);
+        const realProducts = productDefinitions.filter(p => p.isLinked);
+        if (realProducts.length === 0) return;
 
+        setLoading(true);
         const start = new Date(dateRange.year, dateRange.month, 1);
         const end = new Date(dateRange.year, dateRange.month + 1, 0);
-        const formatDate = (d: Date) => d.toISOString().split('T')[0];
+        const startStr = start.toISOString().split('T')[0];
+        const endStr = end.toISOString().split('T')[0];
 
+        // Fetch inventory for EACH product (or optimize backend to accept multiple/all)
+        // Backend handles one product at a time currently: /admin/inventory?product_id=...
+        // We'll parallel fetch.
         try {
-            const response = await fetch(`/inventory?product_id=${driverId}&start_date=${formatDate(start)}&end_date=${formatDate(end)}`);
-            if (response.ok) {
-                const data = await response.json();
-                const enriched = data.inventory.map((day: InventoryDay) => ({
-                    ...day,
-                    p1_capacity: day.capacity,
-                    p1_reserved: day.reserved_qty,
-                    p2_capacity: productDefinitions[1].totalAvailability,
-                    p2_reserved: 1,
-                    p3_capacity: productDefinitions[2].totalAvailability,
-                    p3_reserved: 0,
-                }));
-                setInventory(enriched);
+            const promises = realProducts.map(async p => {
+                const res = await fetch(`/inventory?product_id=${p.id}&start_date=${startStr}&end_date=${endStr}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    return { pid: p.id, data: data.inventory };
+                }
+                return { pid: p.id, data: [] };
+            });
+
+            const results = await Promise.all(promises);
+            
+            // Merge into date-keyed object
+            // Create list of all dates in month
+            const dates: string[] = [];
+            const curr = new Date(start);
+            while (curr <= end) {
+                dates.push(curr.toISOString().split('T')[0]);
+                curr.setDate(curr.getDate() + 1);
             }
+
+            const merged: InventoryDay[] = dates.map(date => {
+                const dayObj: InventoryDay = { date };
+                results.forEach(res => {
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    const found = res.data.find((d: any) => d.date === date);
+                    dayObj[res.pid] = found ? { capacity: found.capacity, reserved: found.reserved_qty } : { capacity: 0, reserved: 0 };
+                    // Fallback to default capacity if not found in day overrides? 
+                    // Backend /inventory returns default if no override exists.
+                });
+                return dayObj;
+            });
+
+            setInventory(merged);
+
         } catch (e) {
             console.error(e);
         } finally {
             setLoading(false);
         }
-    }, [fetch, selectedProductId, products, dateRange, productDefinitions]);
+
+    }, [fetch, productDefinitions, dateRange]);
 
     useEffect(() => {
         loadInventory();
     }, [loadInventory]);
 
+
+    // Handlers
     const handleMonthChange = (direction: 'prev' | 'next') => {
         setDateRange(prev => {
             let newMonth = prev.month + (direction === 'next' ? 1 : -1);
@@ -123,78 +197,117 @@ export default function Inventory() {
     };
 
     const handleEditDay = (day: InventoryDay) => {
-        setEditingDay(day);
-        setCaps({
-            p1: (day.p1_capacity ?? day.capacity).toString(),
-            p2: (day.p2_capacity ?? 0).toString(),
-            p3: (day.p3_capacity ?? 0).toString(),
+        setEditingDay(day.date);
+        const caps: Record<number, string> = {};
+        productDefinitions.filter(p => p.isLinked).forEach(p => {
+             const d = day[p.id];
+             caps[p.id] = d ? d.capacity.toString() : p.totalAvailability.toString();
         });
+        setEditingCaps(caps);
         setEditModalOpen(true);
         setError(null);
     };
 
     const handleSaveDay = async () => {
-        if (!editingDay || !selectedProductId) return;
+        if (!editingDay) return;
         setSaving(true);
         try {
-            const p1 = parseInt(caps.p1);
-            if (isNaN(p1) || p1 < 0) throw new Error("Invalid capacity for Product 1");
-
-            const data = {
-                product_id: parseInt(selectedProductId),
-                overrides: [
-                    { date: editingDay.date, capacity: p1 }
-                ]
-            };
-
-            const res = await fetch('/inventory', {
-                method: 'PUT',
-                body: JSON.stringify(data)
+            // Send PUT for each product? Or backend update to batch?
+            // Existing backend: PUT /inventory takes body { product_id, overrides: [{date, capacity}] }
+            // Must loop.
+            
+            const promises = Object.keys(editingCaps).map(pidStr => {
+                const pid = parseInt(pidStr);
+                const val = parseInt(editingCaps[pid]);
+                if (isNaN(val) || val < 0) return Promise.resolve();
+                
+                return fetch('/inventory', {
+                    method: 'PUT',
+                    body: JSON.stringify({
+                        product_id: pid,
+                        overrides: [{ date: editingDay, capacity: val }]
+                    })
+                });
             });
 
-            if (!res.ok) throw new Error('Failed to update');
-
+            await Promise.all(promises);
             setEditModalOpen(false);
             loadInventory();
 
         } catch (e: unknown) {
-            setError(e instanceof Error ? e.message : 'An unknown error occurred');
+             console.error(e);
         } finally {
             setSaving(false);
         }
     };
 
     const handleEditProduct = (prod: ProductDefinition) => {
-        setEditingProduct(prod);
-        setTempProdTitle(prod.title);
+        setEditingProductDiff(prod);
         setTempProdAvailability(prod.totalAvailability.toString());
-        setTempShopifyId(prod.shopifyProductId);
+        setTempShopifyId(prod.isLinked ? prod.shopifyProductId : '');
         setProductSettingsModalOpen(true);
         setError(null);
     };
 
-    const handleSaveProductSettings = () => {
-        if (!editingProduct) return;
+    const handleSaveProductSettings = async () => {
+        if (!editingProductDiff) return;
 
-        const availability = parseInt(tempProdAvailability);
-        if (isNaN(availability) || availability < 0) {
-            setError("Invalid total availability");
+        // If linking a new ID, we are essentially Creating/Updating a config for that ID.
+        // If we change ID, we might leave the old config orphaned (or we can delete it, but let's just Upsert the new one).
+        
+        const newId = parseInt(tempShopifyId);
+        const capacity = parseInt(tempProdAvailability);
+        
+        if (isNaN(newId) || newId <= 0) {
+            setError("Please select a valid Shopify Product");
+            return;
+        }
+        if (isNaN(capacity) || capacity < 0) {
+            setError("Invalid capacity");
             return;
         }
 
-        setProductDefinitions(prev => prev.map(p =>
-            p.id === editingProduct.id
-                ? { ...p, title: tempProdTitle, totalAvailability: availability, shopifyProductId: tempShopifyId }
-                : p
-        ));
+        setSaving(true);
+        try {
+            const payload = {
+                rentable: true,
+                default_capacity: capacity,
+                // defaults
+                deposit_multiplier: 1
+            };
 
-        setProductSettingsModalOpen(false);
-        setEditingProduct(null);
+            const res = await fetch(`/products/${newId}`, {
+                method: 'PATCH',
+                body: JSON.stringify(payload)
+            });
+
+            if (!res.ok) throw new Error("Failed to save product settings");
+
+            // Refresh configs
+            const configRes = await fetch('/products');
+            if (configRes.ok) {
+                const data = await configRes.json();
+                setProductConfigs(data.products || []);
+            }
+            setProductSettingsModalOpen(false);
+            setEditingProductDiff(null);
+
+        } catch (e) {
+            setError("Failed to save");
+            console.error(e);
+        } finally {
+            setSaving(false);
+        }
     };
 
     const monthName = new Date(dateRange.year, dateRange.month, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
-    const shopifyProductOptions = products.map(p => ({ label: `${p.title} (ID: ${p.product_id})`, value: p.product_id.toString() }));
-    shopifyProductOptions.unshift({ label: 'Select a Shopify Product', value: '' });
+    
+    // Shopify Options for Select
+    const shopifyOptions = shopifyProducts.map(p => ({
+        label: p.title,
+        value: p.id.toString()
+    }));
+    shopifyOptions.unshift({ label: 'Select a Shopify Product', value: '' });
 
     return (
         <Page
@@ -211,20 +324,25 @@ export default function Inventory() {
                         <Grid.Cell key={prod.id} columnSpan={{ xs: 6, sm: 6, md: 4, lg: 4, xl: 4 }}>
                             <Card padding="0">
                                 <Box padding="0">
-                                    <div style={{ height: '160px', overflow: 'hidden', borderTopLeftRadius: 'var(--p-border-radius-200)', borderTopRightRadius: 'var(--p-border-radius-200)' }}>
-                                        <img src={prod.image} alt={prod.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                    <div style={{ height: '160px', overflow: 'hidden', borderTopLeftRadius: 'var(--p-border-radius-200)', borderTopRightRadius: 'var(--p-border-radius-200)', backgroundColor: '#f1f2f3' }}>
+                                        {prod.image ? (
+                                            <img src={prod.image} alt={prod.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                        ) : (
+                                            <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8c9196' }}>No Image</div>
+                                        )}
                                     </div>
                                     <Box padding="400">
                                         <BlockStack gap="200">
                                             <InlineStack align="space-between">
                                                 <Text variant="headingMd" as="h3">{prod.title}</Text>
-                                                <Badge tone="success">{prod.price}</Badge>
+                                                {/* <Badge tone="success">{prod.price}</Badge> */}
                                             </InlineStack>
-                                            <Text variant="bodySm" tone="subdued" as="p">{prod.features}</Text>
+                                            <Text variant="bodySm" tone="subdued" as="p">{prod.isLinked ? `Capacity: ${prod.totalAvailability}` : 'Not Linked'}</Text>
                                             <Divider />
                                             <InlineStack align="space-between">
-                                                <Text variant="bodySm" tone="subdued" as="p">Capacity: <b>{prod.totalAvailability}</b></Text>
-                                                <Button variant="plain" onClick={() => handleEditProduct(prod)}>Edit settings</Button>
+                                                <Button variant="plain" onClick={() => handleEditProduct(prod)}>
+                                                    {prod.isLinked ? 'Edit settings' : 'Link Product'}
+                                                </Button>
                                             </InlineStack>
                                         </BlockStack>
                                     </Box>
@@ -232,6 +350,29 @@ export default function Inventory() {
                             </Card>
                         </Grid.Cell>
                     ))}
+                    {/* Add Product Button if we want to allow more than slots? 
+                        For now, the slots logic above handles it if we start empty.
+                        But if we have configs, we show them. 
+                        We might want a "Plus" Card to add more.*/}
+                     <Grid.Cell columnSpan={{ xs: 6, sm: 6, md: 4, lg: 4, xl: 4 }}>
+                        <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '300px' }}>
+                             <Button onClick={() => {
+                                 setEditingProductDiff({
+                                     id: 0, 
+                                     title: 'New Product', 
+                                     image: '', 
+                                     price: '', 
+                                     features: '',
+                                     totalAvailability: 0,
+                                     shopifyProductId: '',
+                                     isLinked: false
+                                 });
+                                 setTempProdAvailability('10');
+                                 setTempShopifyId('');
+                                 setProductSettingsModalOpen(true);
+                             }}>Add Product Configuration</Button>
+                        </div>
+                     </Grid.Cell>
                 </Grid>
 
                 <Layout>
@@ -242,47 +383,36 @@ export default function Inventory() {
                                 itemCount={inventory.length}
                                 headings={[
                                     { title: 'Date' },
-                                    { title: `${productDefinitions[0].title} (Avail/Total)` },
-                                    { title: `${productDefinitions[1].title} (Avail/Total)` },
-                                    { title: `${productDefinitions[2].title} (Avail/Total)` },
-                                    { title: 'Action' },
+                                    ...productDefinitions.filter(p => p.isLinked).map(p => ({ title: `${p.title} (Avail/Total)` })),
+                                    { title: 'Action' }
                                 ]}
                                 selectable={false}
+                                loading={loading}
                             >
-                                {inventory.map((day, index) => {
-                                    const avail1 = (day.p1_capacity ?? 0) - (day.p1_reserved ?? 0);
-                                    const avail2 = (day.p2_capacity ?? 0) - (day.p2_reserved ?? 0);
-                                    const avail3 = (day.p3_capacity ?? 0) - (day.p3_reserved ?? 0);
-
-                                    return (
-                                        <IndexTable.Row id={day.date} key={day.date} position={index}>
-                                            <IndexTable.Cell>
-                                                <Text variant="bodyMd" fontWeight="bold" as="span">{day.date}</Text>
-                                            </IndexTable.Cell>
-                                            <IndexTable.Cell>
-                                                <InlineStack gap="200">
-                                                    <Text as="span" tone={avail1 <= 0 ? 'critical' : 'success'}>{Math.max(0, avail1)}</Text>
-                                                    <Text as="span" tone="subdued">/ {day.p1_capacity}</Text>
-                                                </InlineStack>
-                                            </IndexTable.Cell>
-                                            <IndexTable.Cell>
-                                                <InlineStack gap="200">
-                                                    <Text as="span" tone={avail2 <= 0 ? 'critical' : 'success'}>{Math.max(0, avail2)}</Text>
-                                                    <Text as="span" tone="subdued">/ {day.p2_capacity}</Text>
-                                                </InlineStack>
-                                            </IndexTable.Cell>
-                                            <IndexTable.Cell>
-                                                <InlineStack gap="200">
-                                                    <Text as="span" tone={avail3 <= 0 ? 'critical' : 'success'}>{Math.max(0, avail3)}</Text>
-                                                    <Text as="span" tone="subdued">/ {day.p3_capacity}</Text>
-                                                </InlineStack>
-                                            </IndexTable.Cell>
-                                            <IndexTable.Cell>
-                                                <Button size="slim" onClick={() => handleEditDay(day)}>Update Avail.</Button>
-                                            </IndexTable.Cell>
-                                        </IndexTable.Row>
-                                    );
-                                })}
+                                {inventory.map((day, index) => (
+                                    <IndexTable.Row id={day.date} key={day.date} position={index}>
+                                        <IndexTable.Cell>
+                                            <Text variant="bodyMd" fontWeight="bold" as="span">{day.date}</Text>
+                                        </IndexTable.Cell>
+                                        {productDefinitions.filter(p => p.isLinked).map(p => {
+                                            const d = day[p.id];
+                                            const cap = d ? d.capacity : p.totalAvailability;
+                                            const res = d ? d.reserved : 0;
+                                            const avail = cap - res;
+                                            return (
+                                                <IndexTable.Cell key={p.id}>
+                                                    <InlineStack gap="200">
+                                                        <Text as="span" tone={avail <= 0 ? 'critical' : 'success'}>{Math.max(0, avail)}</Text>
+                                                        <Text as="span" tone="subdued">/ {cap}</Text>
+                                                    </InlineStack>
+                                                </IndexTable.Cell>
+                                            );
+                                        })}
+                                        <IndexTable.Cell>
+                                            <Button size="slim" onClick={() => handleEditDay(day)}>Update Avail.</Button>
+                                        </IndexTable.Cell>
+                                    </IndexTable.Row>
+                                ))}
                             </IndexTable>
                         </LegacyCard>
                     </Layout.Section>
@@ -293,7 +423,7 @@ export default function Inventory() {
             <Modal
                 open={editModalOpen}
                 onClose={() => setEditModalOpen(false)}
-                title={`Edit Availability for ${editingDay?.date}`}
+                title={`Edit Availability for ${editingDay}`}
                 primaryAction={{
                     content: 'Save Changes',
                     onAction: handleSaveDay,
@@ -305,73 +435,54 @@ export default function Inventory() {
                     <FormLayout>
                         {error && <InlineError message={error} fieldID="error" />}
                         <Grid>
-                            <Grid.Cell columnSpan={{ xs: 6, sm: 6, md: 4, lg: 4, xl: 4 }}>
-                                <TextField
-                                    label={`${productDefinitions[0].title} Capacity`}
-                                    type="number"
-                                    value={caps.p1}
-                                    onChange={(v) => setCaps(prev => ({ ...prev, p1: v }))}
-                                    autoComplete="off"
-                                />
-                            </Grid.Cell>
-                            <Grid.Cell columnSpan={{ xs: 6, sm: 6, md: 4, lg: 4, xl: 4 }}>
-                                <TextField
-                                    label={`${productDefinitions[1].title} Capacity`}
-                                    type="number"
-                                    value={caps.p2}
-                                    onChange={(v) => setCaps(prev => ({ ...prev, p2: v }))}
-                                    autoComplete="off"
-                                />
-                            </Grid.Cell>
-                            <Grid.Cell columnSpan={{ xs: 6, sm: 6, md: 4, lg: 4, xl: 4 }}>
-                                <TextField
-                                    label={`${productDefinitions[2].title} Capacity`}
-                                    type="number"
-                                    value={caps.p3}
-                                    onChange={(v) => setCaps(prev => ({ ...prev, p3: v }))}
-                                    autoComplete="off"
-                                />
-                            </Grid.Cell>
+                            {productDefinitions.filter(p => p.isLinked).map(p => (
+                                <Grid.Cell key={p.id} columnSpan={{ xs: 6, sm: 6, md: 4, lg: 4, xl: 4 }}>
+                                    <TextField
+                                        label={`${p.title} Capacity`}
+                                        type="number"
+                                        value={editingCaps[p.id] || ''}
+                                        onChange={(v) => setEditingCaps(prev => ({ ...prev, [p.id]: v }))}
+                                        autoComplete="off"
+                                    />
+                                </Grid.Cell>
+                            ))}
                         </Grid>
                     </FormLayout>
                 </Modal.Section>
             </Modal>
 
-            {/* Product Settings Modal */}
+            {/* Product Settings / Link Modal */}
             <Modal
                 open={productSettingsModalOpen}
                 onClose={() => setProductSettingsModalOpen(false)}
-                title={`Product Settings: ${editingProduct?.title}`}
+                title={editingProductDiff?.isLinked ? `Edit Settings: ${editingProductDiff.title}` : 'Link Shopify Product'}
                 primaryAction={{
                     content: 'Save Settings',
                     onAction: handleSaveProductSettings,
+                    loading: saving,
                 }}
                 secondaryActions={[{ content: 'Cancel', onAction: () => setProductSettingsModalOpen(false) }]}
             >
                 <Modal.Section>
                     <FormLayout>
                         {error && <InlineError message={error} fieldID="error" />}
-                        <TextField
-                            label="Local Product Name"
-                            value={tempProdTitle}
-                            onChange={setTempProdTitle}
-                            autoComplete="off"
-                            helpText="How this product will be named within the app."
+                        
+                        <Select
+                            label="Shopify Product"
+                            options={shopifyOptions}
+                            value={tempShopifyId}
+                            onChange={setTempShopifyId}
+                            disabled={editingProductDiff?.isLinked} // Cannot change ID once linked (or maybe we allow re-link? simpler to disable for now)
+                            helpText="Select the Shopify product to manage inventory for."
                         />
+
                         <TextField
-                            label="Total Availability"
+                            label="Default Daily Capacity"
                             type="number"
                             value={tempProdAvailability}
                             onChange={setTempProdAvailability}
                             autoComplete="off"
-                            helpText="The base capacity of this product."
-                        />
-                        <Select
-                            label="Link Shopify Product"
-                            options={shopifyProductOptions}
-                            value={tempShopifyId}
-                            onChange={setTempShopifyId}
-                            helpText="Connect this to an actual Shopify product for sync."
+                            helpText="The base count of items available per day."
                         />
                     </FormLayout>
                 </Modal.Section>

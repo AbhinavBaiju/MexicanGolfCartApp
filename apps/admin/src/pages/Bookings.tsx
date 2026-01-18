@@ -81,6 +81,16 @@ export default function Bookings() {
         loadBookings();
     }, [loadBookings]);
 
+    const handleMarkComplete = async (token: string) => {
+        const res = await fetch(`/bookings/${token}/complete`, { method: 'POST' });
+        if (res.ok) {
+            loadBookings();
+        } else {
+             // Maybe show toast or error
+             console.error('Failed to complete');
+        }
+    };
+
     // Handle client-side filtering safely if backend search isn't ready
     const filteredBookings = bookings.filter(b => {
         if (!searchQuery) return true;
@@ -107,7 +117,7 @@ export default function Bookings() {
                     <Tabs tabs={tabs} selected={selectedTab} onSelect={setSelectedTab}>
                         <Box paddingBlockStart="400">
                             {selectedTab === 5 ? (
-                                <BookingsCalendar />
+                                <BookingsCalendar bookings={bookings} />
                             ) : selectedTab === 6 ? (
                                 <Box padding="1600" width="100%">
                                     <InlineStack align="center" blockAlign="center">
@@ -166,7 +176,11 @@ export default function Bookings() {
                                     ) : (
                                         <div>
                                             {filteredBookings.map(booking => (
-                                                <BookingCard key={booking.booking_token} booking={booking} />
+                                                <BookingCard 
+                                                    key={booking.booking_token} 
+                                                    booking={booking} 
+                                                    onMarkComplete={handleMarkComplete}
+                                                />
                                             ))}
                                         </div>
                                     )}

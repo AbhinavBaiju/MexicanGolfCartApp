@@ -2,6 +2,7 @@ import { Env } from './types';
 import { SessionTokenPayload, verifySessionToken } from './auth';
 import { checkRateLimit } from './rateLimit';
 import { listDateStrings, parseDateParts, getTodayInTimeZone } from './date';
+import { STORE_TIMEZONE } from './config';
 
 interface AdminAuthContext {
     shopId: number;
@@ -89,6 +90,18 @@ export async function handleAdminRequest(request: Request, env: Env): Promise<Re
     if (segments.length === 2 && segments[0] === 'bookings') {
         if (method === 'GET') {
             return handleBookingGet(env, auth.shopId, segments[1]);
+        }
+    }
+
+    if (segments.length === 3 && segments[0] === 'bookings' && segments[2] === 'complete') {
+        if (method === 'POST') {
+            return handleBookingComplete(env, auth.shopId, segments[1]);
+        }
+    }
+
+    if (segments.length === 1 && segments[0] === 'shopify-products') {
+        if (method === 'GET') {
+            return handleShopifyProductsGet(env, auth.shopId);
         }
     }
 
@@ -459,48 +472,63 @@ async function handleBookingGet(env: Env, shopId: number, bookingToken: string):
 }
 
 async function handleDashboardGet(env: Env, shopId: number): Promise<Response> {
-    const timeZone = 'America/Mexico_City'; // TODO: Configurable per shop
-    const today = getTodayInTimeZone(timeZone);
+    const today = getTodayInTimeZone(STORE_TIMEZONE);
 
+    // activeBookings: CONFIRMED and overlapping today
     const activeBookingsStmt = env.DB.prepare(
         `SELECT COUNT(*) as count FROM bookings 
-         WHERE shop_id = ? AND status = 'confirmed' AND start_date <= ? AND end_date >= ?`
+         WHERE shop_id = ? AND status = 'CONFIRMED' AND start_date <= ? AND end_date >= ?`
     ).bind(shopId, today, today);
 
+    // pendingHolds: HOLD
     const pendingHoldsStmt = env.DB.prepare(
         `SELECT COUNT(*) as count FROM bookings 
-         WHERE shop_id = ? AND status = 'hold'`
+         WHERE shop_id = ? AND status = 'HOLD'`
     ).bind(shopId);
 
+    // pickups: start_date = today, CONFIRMED/HOLD
     const pickupsStmt = env.DB.prepare(
         `SELECT booking_token, location_code, order_id, status FROM bookings 
-         WHERE shop_id = ? AND start_date = ? AND status IN ('confirmed', 'hold')`
+         WHERE shop_id = ? AND start_date = ? AND status IN ('CONFIRMED', 'HOLD')`
     ).bind(shopId, today);
 
+    // dropoffs: end_date = today, CONFIRMED/HOLD
     const dropoffsStmt = env.DB.prepare(
         `SELECT booking_token, location_code, order_id, status FROM bookings 
-         WHERE shop_id = ? AND end_date = ? AND status IN ('confirmed', 'hold')`
+         WHERE shop_id = ? AND end_date = ? AND status IN ('CONFIRMED', 'HOLD')`
     ).bind(shopId, today);
 
+    // upcoming: start_date > today, CONFIRMED
     const upcomingStmt = env.DB.prepare(
-        `SELECT booking_token, start_date, end_date, location_code, status FROM bookings 
-         WHERE shop_id = ? AND start_date > ? AND status = 'confirmed' 
+        `SELECT booking_token, start_date, end_date, location_code, status, order_id FROM bookings 
+         WHERE shop_id = ? AND start_date > ? AND status = 'CONFIRMED' 
          ORDER BY start_date ASC LIMIT 5`
     ).bind(shopId, today);
 
+    // history: recent
     const historyStmt = env.DB.prepare(
         `SELECT booking_token, start_date, end_date, status, created_at, invalid_reason FROM bookings 
          WHERE shop_id = ? 
          ORDER BY created_at DESC LIMIT 10`
     ).bind(shopId);
 
-    const [active, pending, pickups, dropoffs, upcoming, history] = await env.DB.batch([
+    const bookingsCountStmt = env.DB.prepare(
+        `SELECT COUNT(*) as count FROM bookings WHERE shop_id = ? AND status = 'CONFIRMED'`
+    ).bind(shopId);
+
+    const cancelledCountStmt = env.DB.prepare(
+        `SELECT COUNT(*) as count FROM bookings WHERE shop_id = ? AND status IN ('CANCELLED', 'EXPIRED', 'INVALID')`
+    ).bind(shopId);
+
+    const [active, pending, pickups, dropoffs, upcoming, history, bCount, cCount] = await env.DB.batch([
         activeBookingsStmt,
         pendingHoldsStmt,
         pickupsStmt,
         dropoffsStmt,
         upcomingStmt,
-        historyStmt
+        historyStmt,
+        bookingsCountStmt,
+        cancelledCountStmt
     ]);
 
     return Response.json({
@@ -509,6 +537,9 @@ async function handleDashboardGet(env: Env, shopId: number): Promise<Response> {
         stats: {
             active_bookings: (active.results?.[0] as any)?.count ?? 0,
             pending_holds: (pending.results?.[0] as any)?.count ?? 0,
+            bookings_count: (bCount.results?.[0] as any)?.count ?? 0,
+            cancelled_count: (cCount.results?.[0] as any)?.count ?? 0,
+            revenue: 0
         },
         todayActivity: {
             pickups: pickups.results ?? [],
@@ -517,6 +548,100 @@ async function handleDashboardGet(env: Env, shopId: number): Promise<Response> {
         upcomingBookings: upcoming.results ?? [],
         recentHistory: history.results ?? []
     });
+}
+
+async function handleBookingComplete(env: Env, shopId: number, bookingToken: string): Promise<Response> {
+    const booking = await env.DB.prepare(
+        `SELECT id, order_id, status FROM bookings WHERE shop_id = ? AND booking_token = ?`
+    ).bind(shopId, bookingToken).first();
+
+    if (!booking) {
+        return jsonError('Booking not found', 404);
+    }
+    const orderId = booking.order_id as number;
+
+    let fulfillmentResult = { success: false, message: 'No Order ID' };
+
+    if (orderId) {
+        fulfillmentResult = await fulfillShopifyOrder(env, shopId, orderId);
+    }
+
+    await env.DB.prepare(
+        `UPDATE bookings SET status = 'RELEASED', updated_at = datetime('now') WHERE id = ?`
+    ).bind(booking.id).run();
+
+    return Response.json({ ok: true, fulfillment: fulfillmentResult });
+}
+
+async function fulfillShopifyOrder(env: Env, shopId: number, orderId: number): Promise<{ success: boolean; message: string }> {
+     const shopRow = await env.DB.prepare('SELECT shop_domain, access_token FROM shops WHERE id = ?')
+        .bind(shopId).first();
+    if (!shopRow) return { success: false, message: 'Shop not found' };
+
+    const { shop_domain, access_token } = shopRow as { shop_domain: string; access_token: string };
+
+    const foRes = await fetch(`https://${shop_domain}/admin/api/2024-04/orders/${orderId}/fulfillment_orders.json`, {
+        headers: { 'X-Shopify-Access-Token': access_token }
+    });
+
+    if (!foRes.ok) return { success: false, message: 'Failed to fetch fulfillment orders' };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const foData = await foRes.json() as any;
+    const fulfillmentOrders = foData.fulfillment_orders;
+
+    if (!fulfillmentOrders || fulfillmentOrders.length === 0) {
+        return { success: false, message: 'No fulfillment orders found' };
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const openOrders = fulfillmentOrders.filter((fo: any) => fo.status === 'open');
+    if (openOrders.length === 0) return { success: true, message: 'Order already fulfilled' };
+
+    const targetFo = openOrders[0];
+    const payload = {
+        fulfillment: {
+            line_items_by_fulfillment_order: [{
+                fulfillment_order_id: targetFo.id
+            }]
+        }
+    };
+
+    const createRes = await fetch(`https://${shop_domain}/admin/api/2024-04/fulfillments.json`, {
+        method: 'POST',
+        headers: {
+            'X-Shopify-Access-Token': access_token,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+    });
+
+    if (!createRes.ok) {
+        const txt = await createRes.text();
+        console.error('Fulfillment failed', txt);
+        return { success: false, message: 'Fulfillment failed' };
+    }
+
+    return { success: true, message: 'Fulfilled' };
+}
+
+async function handleShopifyProductsGet(env: Env, shopId: number): Promise<Response> {
+    const shopRow = await env.DB.prepare('SELECT shop_domain, access_token FROM shops WHERE id = ?')
+        .bind(shopId).first();
+    if (!shopRow) return jsonError('Shop not found', 404);
+
+    const { shop_domain, access_token } = shopRow as { shop_domain: string; access_token: string };
+
+    const response = await fetch(`https://${shop_domain}/admin/api/2024-04/products.json?fields=id,title,images,variants,status`, {
+        headers: { 'X-Shopify-Access-Token': access_token }
+    });
+
+    if (!response.ok) {
+        return jsonError('Failed to fetch products from Shopify', 502);
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data = await response.json() as any;
+    return Response.json({ ok: true, products: data.products });
 }
 
 function rateLimitKey(request: Request, scope: string): string {

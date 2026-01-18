@@ -36,7 +36,6 @@ interface DashboardStatsProps {
         revenue: number;
         bookingsCount: number;
         cancelledCount: number;
-        views: number;
     };
 }
 
@@ -49,12 +48,10 @@ export function DashboardStats({ stats }: DashboardStatsProps) {
     return (
         <Card>
             <Box padding="400">
-                <InlineGrid columns={4} gap="400">
+                <InlineGrid columns={3} gap="400">
                     <StatItem title="Revenue" value={formatCurrency(stats.revenue)} percentage="0%" />
                     <StatItem title="Bookings" value={stats.bookingsCount.toString()} percentage="0%" />
                     <StatItem title="Cancelled bookings" value={stats.cancelledCount.toString()} percentage="0%" />
-                    {/* Views has a tooltip/dropdown in screenshot, ignoring for now */}
-                    <StatItem title="Views" value={stats.views.toString()} percentage="0%" />
                 </InlineGrid>
             </Box>
         </Card>

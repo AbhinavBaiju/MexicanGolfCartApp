@@ -1,1 +1,1 @@
-export const STORE_TIMEZONE = 'America/Mazatlan';
+export const STORE_TIMEZONE = 'America/Mexico_City';

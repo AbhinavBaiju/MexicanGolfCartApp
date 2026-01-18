@@ -54,37 +54,55 @@ const DASHBOARD_STYLES = `
 export default function Dashboard() {
     const fetch = useAuthenticatedFetch();
     const [bookings, setBookings] = useState<Booking[]>([]);
-    const [loading, setLoading] = useState(true);
     const [stats, setStats] = useState({
         revenue: 0,
         bookingsCount: 0,
-        cancelledCount: 0,
-        views: 0
+        cancelledCount: 0
     });
+    const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
 
     const loadData = useCallback(async () => {
         setLoading(true);
         try {
-            // Fetch all bookings for stats (simplified: fetching all might be heavy in prod, but ok for now)
-            // In a real app we might want a dedicated stats endpoint.
-            const response = await fetch('/bookings');
+            const response = await fetch('/dashboard');
             if (response.ok) {
                 const data = await response.json();
-                const fetchedBookings: Booking[] = data.bookings || [];
-                setBookings(fetchedBookings);
+                
+                // data.upcomingBookings is just top 5. We should store them.
+                // But the UI filters 'bookings' for upcoming.
+                // The current UI logic (filtering 'bookings' array) assumes we have ALL bookings.
+                // /dashboard only returns top 5 upcoming.
+                // Does /dashboard return ALL bookings? No.
+                // So the "Upcoming bookings" section needs to use `data.upcomingBookings`.
+                // And logic `bookings.filter` is redundant if we use `data.upcomingBookings`.
+                // However, `BookingsCalendar` needs bookings date ranges.
+                // If I want the Calendar to work, I need more bookings.
+                // Maybe I should fetch `/bookings` alongside?
+                // The prompt says "wire everything together".
+                // Efficient way: Fetch `/bookings?start_date=...&end_date=...` for calendar.
+                // For now, I'll fetch `/bookings` (all active/recent) to populate calendar and list if `/dashboard` is insufficient.
+                // But let's check what I implemented in backend `handleDashboardGet`.
+                // It returns `upcomingBookings` (limit 5).
+                // It returns `stats` (aggregates).
+                
+                // To display the Calendar properly, I need all bookings for the month.
+                // I will fetch `/bookings` as well.
+                
+                const [, bookingsRes] = await Promise.all([
+                    Promise.resolve(data), // already json
+                    fetch('/bookings')
+                ]);
 
-                // Calculate stats
-                const confirmed = fetchedBookings.filter(b => b.status === 'CONFIRMED');
-                const cancelled = fetchedBookings.filter(b => b.status === 'CANCELLED');
-                // Mock revenue logic as no price in Booking type yet
-                const revenue = confirmed.reduce((acc, b) => acc + (b.order_id ? 100 : 0), 0);
+                if (bookingsRes.ok) {
+                    const bookingsData = await bookingsRes.json();
+                    setBookings(bookingsData.bookings || []);
+                }
 
                 setStats({
-                    revenue,
-                    bookingsCount: confirmed.length,
-                    cancelledCount: cancelled.length,
-                    views: 0 // Mocked
+                    revenue: parseInt(data.stats.revenue || '0'), // Backend sends 0
+                    bookingsCount: parseInt(data.stats.bookings_count || '0'),
+                    cancelledCount: parseInt(data.stats.cancelled_count || '0'),
                 });
             }
         } catch (error) {
@@ -98,9 +116,18 @@ export default function Dashboard() {
         loadData();
     }, [loadData]);
 
+    const handleMarkComplete = async (token: string) => {
+        const res = await fetch(`/bookings/${token}/complete`, { method: 'POST' });
+        if (res.ok) {
+            loadData();
+        } else {
+            console.error('Failed to complete');
+        }
+    };
+
     const upcomingBookings = bookings.filter(b => {
         if (b.status !== 'CONFIRMED') return false;
-        const bookingDate = new Date(b.start_date); // Assuming start_date
+        const bookingDate = new Date(b.start_date); 
         return bookingDate >= new Date();
     });
 
@@ -212,7 +239,11 @@ export default function Dashboard() {
                                     ) : (
                                         <div>
                                             {filteredUpcoming.slice(0, 5).map(booking => (
-                                                <BookingCard key={booking.booking_token} booking={booking} />
+                                                <BookingCard 
+                                                    key={booking.booking_token} 
+                                                    booking={booking} 
+                                                    onMarkComplete={handleMarkComplete}
+                                                />
                                             ))}
                                             {filteredUpcoming.length > 5 && (
                                                 <Box padding="400">

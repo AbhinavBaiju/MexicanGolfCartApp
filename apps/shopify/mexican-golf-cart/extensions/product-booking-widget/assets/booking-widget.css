@@ -4,8 +4,8 @@
    ============================================ */
 
 :root {
-  --gc-color-primary: #C8102E;
-  --gc-color-primary-hover: #A00C24;
+  --gc-color-primary: #006341;
+  --gc-color-primary-hover: #004d32;
   --gc-color-input-bg: #F7F7F7;
   --gc-color-text-label: #333333;
   --gc-color-text-input: #111111;
@@ -39,7 +39,8 @@
   background: #FFFFFF;
   border-radius: 50px;
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
-  height: 500px;
+  height: auto;
+  min-height: 500px;
   width: 100%;
   padding: 28px;
   box-sizing: border-box;
@@ -117,12 +118,37 @@
   margin-top: 8px;
 }
 
+.gc-grid-container {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 24px;
+}
+
+@media (min-width: 992px) {
+  .gc-grid-container {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.gc-grid-col-left {
+  /* Empty column */
+  min-height: 200px;
+  /* Placeholder height */
+}
+
+.gc-grid-col-right {
+  display: flex;
+  flex-direction: column;
+}
+
 /* ============================================
    BOOKING FORM STYLES
    ============================================ */
 
 .gc-booking-form {
   max-width: 100%;
+  position: relative;
+  /* Anchor for flatpickr */
 }
 
 .gc-form-grid {
@@ -198,6 +224,66 @@
   color: #666;
 }
 
+/* ============================================
+   FULFILLMENT & DYNAMIC SECTIONS
+   ============================================ */
+
+.gc-fulfillment-options {
+  display: flex;
+  gap: 12px;
+}
+
+.gc-radio-label {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background-color: var(--gc-color-input-bg);
+  border: 1px solid var(--gc-color-border);
+  border-radius: var(--gc-radius-input);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.gc-radio-label:hover {
+  background-color: #EFEFEF;
+}
+
+.gc-radio-label:has(input:checked) {
+  border-color: var(--gc-color-focus-ring);
+  background-color: rgba(0, 122, 255, 0.05);
+  box-shadow: 0 0 0 1px var(--gc-color-focus-ring);
+}
+
+.gc-radio-text {
+  font-weight: 500;
+  color: var(--gc-color-text-input);
+}
+
+.gc-dynamic-details {
+  margin-top: -8px;
+  /* Slightly closer to the fulfillment toggle */
+}
+
+.gc-location-display {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background-color: rgba(0, 0, 0, 0.02);
+  border-radius: 8px;
+  color: #555;
+  font-size: 14px;
+}
+
+.gc-location-display .icon-sm {
+  flex: 0 0 16px;
+  color: #777;
+}
+
+
+
 /* Date Range specific */
 .gc-date-range {
   display: grid;
@@ -212,7 +298,7 @@
 .gc-submit-btn {
   width: 100%;
   height: 56px;
-  background-color: var(--gc-color-primary);
+  background-color: #CE1226;
   color: #FFFFFF;
   border: none;
   border-radius: var(--gc-radius-input);
@@ -227,9 +313,9 @@
 }
 
 .gc-submit-btn:hover {
-  background-color: var(--gc-color-primary-hover);
+  background-color: #B21021;
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(200, 16, 46, 0.3);
+  box-shadow: 0 4px 12px rgba(206, 18, 38, 0.3);
 }
 
 .gc-submit-btn:active {
@@ -371,7 +457,8 @@
   }
 
   .gc-date-range {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
   }
 
   .gc-input,
@@ -395,5 +482,283 @@
 
   .mgc-white-card__title {
     font-size: 20px;
+  }
+}
+
+/* ============================================
+   UPDATED LOCATION & QUANTITY ROW
+   ============================================ */
+
+.gc-form-row.gc-location-quantity-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+/* Stepper Styles */
+.gc-quantity-wrapper {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--gc-color-border);
+  border-radius: var(--gc-radius-input);
+  background-color: var(--gc-color-input-bg);
+  height: 56px;
+  overflow: hidden;
+  transition: all 0.2s ease;
+}
+
+.gc-quantity-wrapper:focus-within {
+  border-color: var(--gc-color-focus-ring);
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15);
+  background-color: #FFFFFF;
+}
+
+.gc-qty-btn {
+  width: 44px;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: var(--gc-color-primary);
+  /* font-size: 18px; */
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s;
+  padding: 0;
+  margin: 0;
+}
+
+.gc-qty-btn:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+.gc-qty-btn:active {
+  background-color: rgba(0, 0, 0, 0.1);
+}
+
+.gc-qty-input {
+  flex: 1;
+  width: 100%;
+  border: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  text-align: center;
+  padding: 0 !important;
+  height: 100%;
+  margin: 0;
+  font-weight: 600;
+  font-size: 18px;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.gc-qty-input::-webkit-outer-spin-button,
+.gc-qty-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+@media (max-width: 560px) {
+  .gc-quantity-wrapper {
+    height: 52px;
+  }
+}
+
+/* ============================================
+   FLATPICKR CUSTOMIZATION (Redesign v2)
+   ============================================ */
+
+.flatpickr-calendar {
+  font-family: inherit !important;
+  border: none !important;
+  box-shadow: 0 4px 25px rgba(0, 0, 0, 0.1) !important;
+  border-radius: 20px !important;
+  margin-top: 12px;
+  padding: 20px !important;
+  width: 100% !important;
+  max-width: none !important;
+  background: #fff !important;
+  z-index: 99999 !important;
+}
+
+.flatpickr-months {
+  margin-bottom: 20px !important;
+  align-items: center !important;
+}
+
+.flatpickr-month {
+  color: #111 !important;
+  fill: #111 !important;
+  height: 40px !important;
+}
+
+.flatpickr-current-month {
+  padding-top: 0 !important;
+  font-size: 18px !important;
+  /* Larger, bolder header */
+  font-weight: 700 !important;
+  left: 0 !important;
+  width: 100% !important;
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+}
+
+.flatpickr-current-month input.cur-year {
+  font-weight: 700 !important;
+  color: inherit !important;
+}
+
+/* Hide month scrolling arrows for cleaner look if desired, or style them minimal */
+.flatpickr-current-month .numInputWrapper {
+  display: none !important;
+  /* Hide year spinner arrows */
+}
+
+.flatpickr-weekdays {
+  margin-bottom: 12px;
+}
+
+.flatpickr-weekday {
+  color: #888 !important;
+  /* Lighter utility text */
+  font-weight: 500 !important;
+  font-size: 14px !important;
+  text-transform: capitalize !important;
+  /* purely personal pref, standard often shorthand */
+}
+
+.flatpickr-day {
+  font-weight: 500;
+  color: #222;
+  border: none !important;
+  margin-top: 6px !important;
+  height: 44px !important;
+  line-height: 44px !important;
+  font-size: 15px !important;
+  max-width: none !important;
+  /* For flex layout */
+}
+
+/* Hover State */
+.flatpickr-day:hover,
+.flatpickr-day.prevMonthDay:hover,
+.flatpickr-day.nextMonthDay:hover,
+.flatpickr-day:focus {
+  background: #f7f7f7 !important;
+  color: #000 !important;
+  border-radius: 100% !important;
+  /* Perfect circle hover */
+}
+
+/* Range Start & End - The Circles */
+.flatpickr-day.selected.startRange,
+.flatpickr-day.startRange.startRange,
+.flatpickr-day.endRange.startRange,
+.flatpickr-day.selected.endRange,
+.flatpickr-day.startRange.endRange,
+.flatpickr-day.endRange.endRange {
+  background: var(--gc-color-primary) !important;
+  color: #fff !important;
+  border-color: var(--gc-color-primary) !important;
+  border-radius: 100% !important;
+  /* Circle shape */
+  box-shadow: none !important;
+  z-index: 2;
+  /* Sit above the range strip */
+}
+
+/* The Range Strip - Middle connection */
+.flatpickr-day.inRange,
+.flatpickr-day.prevMonthDay.inRange,
+.flatpickr-day.nextMonthDay.inRange,
+.flatpickr-day.today.inRange,
+.flatpickr-day.prevMonthDay.today.inRange,
+.flatpickr-day.nextMonthDay.today.inRange {
+  background: rgba(0, 99, 65, 0.08) !important;
+  /* Very light primary wash */
+  color: #111 !important;
+  border-radius: 0 !important;
+  box-shadow: -5px 0 0 rgba(0, 99, 65, 0.08), 5px 0 0 rgba(0, 99, 65, 0.08) !important;
+  border: none !important;
+}
+
+/* Fix for Start/End appearing "connected" seamlessly */
+/* We want the start circle to sit ON TOP of a potential background strip if we wanted that style (Airbnb style usually has circle + strip). */
+/* Flatpickr doesn't easily support "circle on top of strip" DOM structure without pseudo elements, but we can fake it with gradients or careful sibling styling.
+   However, the requested screenshot shows DISTINCT circles for start/end, and a light background connecting them. 
+*/
+
+/* Reset stacking context */
+.flatpickr-day.selected.startRange+.endRange:not(:nth-child(7n+1)),
+.flatpickr-day.startRange.startRange+.endRange:not(:nth-child(7n+1)),
+.flatpickr-day.endRange.startRange+.endRange:not(:nth-child(7n+1)) {
+  box-shadow: -10px 0 0 rgba(0, 99, 65, 0.08) !important;
+}
+
+/* Today */
+.flatpickr-day.today {
+  border: none !important;
+  font-weight: 700 !important;
+  color: var(--gc-color-primary) !important;
+}
+
+.flatpickr-day.today:hover {
+  background: #f0f0f0 !important;
+  color: var(--gc-color-primary) !important;
+}
+
+/* Navigation Arrows */
+.flatpickr-prev-month,
+.flatpickr-next-month {
+  padding: 10px !important;
+  top: 50% !important;
+  transform: translateY(-50%);
+  height: 32px !important;
+  width: 32px !important;
+  border-radius: 50%;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+}
+
+.flatpickr-prev-month svg,
+.flatpickr-next-month svg {
+  width: 14px !important;
+  height: 14px !important;
+  fill: #333 !important;
+}
+
+.flatpickr-prev-month:hover,
+.flatpickr-next-month:hover {
+  background: #f7f7f7 !important;
+}
+
+/* Disabled/Past Dates */
+.flatpickr-day.flatpickr-disabled,
+.flatpickr-day.flatpickr-disabled:hover {
+  color: #e0e0e0 !important;
+  background: transparent !important;
+  cursor: not-allowed;
+}
+
+/* Layout - Double Month Desktop */
+@media (min-width: 768px) {
+  .flatpickr-calendar.rangeMode {
+    width: 100% !important;
+    /* We rely on JS to set 'width' to pixel value of container, but here we ensure internal layout works */
+  }
+}
+
+/* Mobile Adjustments */
+@media (max-width: 767px) {
+  .flatpickr-months .flatpickr-month {
+    height: 50px !important;
+  }
+
+  .flatpickr-current-month {
+    font-size: 16px !important;
   }
 }

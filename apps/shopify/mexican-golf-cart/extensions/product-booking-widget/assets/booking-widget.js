@@ -1,3 +1,4 @@
+/* global flatpickr, rangePlugin */
 document.addEventListener('DOMContentLoaded', () => {
     const forms = document.querySelectorAll('.gc-booking-form');
 
@@ -42,7 +43,6 @@ document.addEventListener('DOMContentLoaded', () => {
         init();
 
         function init() {
-            // setMinDates(); // Replaced by Flatpickr
             initDatePickers();
             fetchLocations();
             attachListeners();
@@ -66,12 +66,96 @@ document.addEventListener('DOMContentLoaded', () => {
             elements.start.setAttribute('readonly', 'readonly');
             elements.end.setAttribute('readonly', 'readonly');
 
-            // Unique ID for mapping if needed (not strictly necessary with direct el reference)
-            // elements.end.id = 'booking_end_date';
+            // Always show 2 months side by side to match reference design
+            const showMonths = 2;
 
-            // Determine months based on container width
-            const containerWidth = form.offsetWidth;
-            const showMonths = (containerWidth > 620 && window.innerWidth >= 768) ? 2 : 1;
+            // Store pending dates before confirmation
+            let pendingDates = [];
+
+            // Helper: Calculate days between two dates
+            const calculateDays = (startDate, endDate) => {
+                if (!startDate || !endDate) return 0;
+                const diffTime = Math.abs(endDate - startDate);
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                return diffDays;
+            };
+
+            // Helper: Update footer day count
+            const updateFooterDays = (instance, selectedDates) => {
+                const footer = instance.calendarContainer?.querySelector('.mgc-calendar-footer');
+                if (!footer) return;
+
+                const daysEl = footer.querySelector('.mgc-calendar-footer__days');
+                const doneBtn = footer.querySelector('.mgc-calendar-footer__btn--done');
+
+                if (selectedDates.length === 2) {
+                    const days = calculateDays(selectedDates[0], selectedDates[1]);
+                    daysEl.textContent = `${days} day${days !== 1 ? 's' : ''}`;
+                    doneBtn.disabled = false;
+                    doneBtn.style.opacity = '1';
+                } else if (selectedDates.length === 1) {
+                    daysEl.textContent = 'Select end date';
+                    doneBtn.disabled = true;
+                    doneBtn.style.opacity = '0.5';
+                } else {
+                    daysEl.textContent = 'Select dates';
+                    doneBtn.disabled = true;
+                    doneBtn.style.opacity = '0.5';
+                }
+            };
+
+            // Helper: Create and inject footer
+            const injectFooter = (instance) => {
+                if (!instance.calendarContainer) return;
+
+                // Check if footer already exists
+                if (instance.calendarContainer.querySelector('.mgc-calendar-footer')) return;
+
+                const footer = document.createElement('div');
+                footer.className = 'mgc-calendar-footer';
+                footer.innerHTML = `
+                    <span class="mgc-calendar-footer__days">Select dates</span>
+                    <div class="mgc-calendar-footer__actions">
+                        <button type="button" class="mgc-calendar-footer__btn mgc-calendar-footer__btn--cancel">Cancel</button>
+                        <button type="button" class="mgc-calendar-footer__btn mgc-calendar-footer__btn--done" disabled style="opacity: 0.5">Done</button>
+                    </div>
+                `;
+
+                instance.calendarContainer.appendChild(footer);
+
+                // Cancel button handler
+                footer.querySelector('.mgc-calendar-footer__btn--cancel').addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    pendingDates = [];
+                    instance.close();
+                });
+
+                // Done button handler
+                footer.querySelector('.mgc-calendar-footer__btn--done').addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (pendingDates.length === 2) {
+                        // Confirm the selection
+                        validateDates();
+                        debouncedCheckAvailability();
+                        instance.close();
+                    }
+                });
+            };
+
+            // Custom locale for 2-letter weekday abbreviations (matching reference design)
+            const customLocale = {
+                firstDayOfWeek: 1, // Start week on Monday
+                weekdays: {
+                    shorthand: ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'],
+                    longhand: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+                },
+                months: {
+                    shorthand: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+                    longhand: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+                }
+            };
 
             const pickerConfig = {
                 mode: 'range',
@@ -81,111 +165,73 @@ document.addEventListener('DOMContentLoaded', () => {
                 dateFormat: "Y-m-d",
                 altInput: true,
                 altFormat: "M j, Y",
-                // Remove appendTo: form to fix positioning issues (renders in body by default)
+                closeOnSelect: false, // Keep open until Done is clicked
+                locale: customLocale,
 
                 plugins: [new rangePlugin({ input: elements.end })],
 
+                onReady: function (selectedDates, dateStr, instance) {
+                    // Inject custom footer
+                    injectFooter(instance);
+
+                    // Add showMonths class for CSS targeting
+                    if (showMonths === 2) {
+                        instance.calendarContainer.classList.add('showMonths2');
+                    }
+                },
+
                 onOpen: function (selectedDates, dateStr, instance) {
                     if (instance.calendarContainer) {
-                        // Align to the specific date-range container or the whole form?
-                        // User request: "same width as the input boxes's vertical spacing (total)"
-                        // This implies matching the .gc-date-range container width.
-                        const targetContainer = form.querySelector('.gc-date-range') || form;
+                        // Ensure footer exists
+                        injectFooter(instance);
 
-                        const updatePosition = () => {
-                            if (!instance.calendarContainer) return;
-
-                            const rect = targetContainer.getBoundingClientRect();
-                            const docScrollTop = window.scrollY || document.documentElement.scrollTop;
-                            const docScrollLeft = window.scrollX || document.documentElement.scrollLeft;
-
-                            // Force exact width of the input group
-                            instance.calendarContainer.style.width = `${rect.width}px`;
-
-                            // Align perfectly with left edge
-                            instance.calendarContainer.style.left = `${rect.left + docScrollLeft}px`;
-
-                            // Ensure it's just below
-                            // instance.calendarContainer.style.top = `${rect.bottom + docScrollTop + 10}px`; 
-                            // Flatpickr handles top automatically usually, but we can enforce if needed.
-                        };
-
-                        updatePosition();
-
-                        // Small delay to override any internal Flatpickr recalcs
-                        requestAnimationFrame(updatePosition);
+                        // Update footer state based on current selection
+                        pendingDates = [...selectedDates];
+                        updateFooterDays(instance, selectedDates);
 
                         // Add class for styling hooks
                         instance.calendarContainer.classList.add('mgc-custom-calendar');
                     }
                 },
 
-                onValueUpdate: function (d, s, instance) {
-                    // Keep aligned on value updates if needed
-                    // if(instance.calendarContainer) { ... }
-                },
-
-                onValueUpdate: function (d, s, instance) {
-                    // Keep aligned on value updates if needed
-                    if (instance.calendarContainer) {
-                        const currentFormRect = form.getBoundingClientRect();
-                        const docScrollLeft = window.scrollX || document.documentElement.scrollLeft;
-                        instance.calendarContainer.style.left = `${currentFormRect.left + docScrollLeft}px`;
-                    }
-                },
-
                 onChange: function (selectedDates, dateStr, instance) {
+                    // Store pending dates
+                    pendingDates = [...selectedDates];
+
+                    // Update footer day count
+                    updateFooterDays(instance, selectedDates);
+
                     // Constraint: Minimum 1 day range (Start != End)
                     if (selectedDates.length === 2) {
                         const start = selectedDates[0];
                         const end = selectedDates[1];
 
                         if (start.getTime() === end.getTime()) {
-                            // If user picked the same day twice, clear/reset or just clear the end date?
-                            // Flatpickr range mode often handles "click same day twice" as "unselect".
-                            // But if they select range start==end, we want to forbid it.
-                            // However, in range mode, usually you click once for start, mouseover defines range, click again for end.
-                            // If you click the same date twice, it becomes a 1-day range.
-
-                            // We will clear the selection if it's the same day to force re-selection or valid range.
-                            // Or better: set the date to just start and keep picker open? 
-                            // Unfortunately programmatic open inside onChange can be glitchy.
-
-                            // Let's validate downstream first: debouncedCheckAvailability handles checks.
-                            // If we enforce it here, we might annoy users.
-                            // But user said: "not the same day". 
-
-                            // Let's clear the end date if it matches start.
-                            // Actually, with rangePlugin, dateStr is the range string "start to end" or similar in internal value?
-                            // No, rangePlugin puts separate values in inputs.
+                            // Same day selected - reset to just start date
+                            instance.setDate([start], false);
+                            pendingDates = [start];
+                            updateFooterDays(instance, [start]);
                         }
                     }
-                    validateDates(); // Our existing logic can check dates too
-                    debouncedCheckAvailability();
+                },
+
+                onClose: function (selectedDates, dateStr, instance) {
+                    // If user closed without clicking Done, and we have confirmed dates, keep them
+                    // No additional action needed - Flatpickr maintains the last valid selection
+                    if (selectedDates.length === 2) {
+                        validateDates();
+                        debouncedCheckAvailability();
+                    }
                 }
             };
 
             // Initialize on Start Input
             elements.startPicker = flatpickr(elements.start, pickerConfig);
 
-            // Allow clicking end input to open the same picker
-            // (RangePlugin usually handles this)
-
             // Dynamic Resizing support
             window.addEventListener('resize', () => {
                 if (elements.startPicker && elements.startPicker.isOpen) {
                     elements.startPicker.redraw();
-                    // Manually trigger our positioning logic if we extracted it, 
-                    // or rely on flatpickr's redraw + our onOpen (which fires on redraw?) - No, redraw doesn't fire onOpen.
-                    // We need to re-run the positioning logic.
-                    const instance = elements.startPicker;
-                    if (instance.calendarContainer) {
-                        const targetContainer = form.querySelector('.gc-date-range') || form;
-                        const rect = targetContainer.getBoundingClientRect();
-                        const docScrollLeft = window.scrollX || document.documentElement.scrollLeft;
-                        instance.calendarContainer.style.width = `${rect.width}px`;
-                        instance.calendarContainer.style.left = `${rect.left + docScrollLeft}px`;
-                    }
                 }
             });
         }
@@ -195,12 +241,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 const blob = new Blob([JSON.stringify({ booking_token: currentBookingToken })], { type: 'application/json' });
                 navigator.sendBeacon(`${API_BASE}/release?shop=${shopDomain}`, blob);
             }
-        }
-
-        function setMinDates() {
-            const today = new Date().toISOString().split('T')[0];
-            if (elements.start) elements.start.min = today;
-            if (elements.end) elements.end.min = today;
         }
 
         async function fetchLocations() {

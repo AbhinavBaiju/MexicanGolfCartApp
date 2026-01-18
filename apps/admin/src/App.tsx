@@ -8,7 +8,6 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Dashboard from './pages/Dashboard';
 import Bookings from './pages/Bookings';
 import Inventory from './pages/Inventory';
-import Products from './pages/Products';
 import Locations from './pages/Locations';
 
 function AppContent() {
@@ -18,14 +17,12 @@ function AppContent() {
         <a href="/" rel="home">Dashboard</a>
         <a href="/bookings">Bookings</a>
         <a href="/inventory">Inventory</a>
-        <a href="/products">Products</a>
         <a href="/locations">Locations</a>
       </NavMenu>
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/bookings" element={<Bookings />} />
         <Route path="/inventory" element={<Inventory />} />
-        <Route path="/products" element={<Products />} />
         <Route path="/locations" element={<Locations />} />
       </Routes>
     </Frame>

@@ -1,17 +1,32 @@
-import { Page, Layout, LegacyCard, IndexTable, Text, Select, Button, Modal, TextField, FormLayout, InlineError, Badge } from '@shopify/polaris';
+import { Page, Layout, LegacyCard, IndexTable, Text, Select, Button, Modal, TextField, FormLayout, InlineError, Badge, Grid, Card, BlockStack, InlineStack, Box } from '@shopify/polaris';
 import { useAuthenticatedFetch } from '../api';
 import { useEffect, useState, useCallback } from 'react';
 
 interface ProductInfo {
     product_id: number;
-    // ... other fields
+    title: string;
+    image?: string;
+    default_capacity: number;
 }
 
 interface InventoryDay {
     date: string;
-    capacity: number;
+    capacity: number; // For product 1 (backward compat or generic)
     reserved_qty: number;
+    // Multi-product support
+    p1_capacity?: number;
+    p1_reserved?: number;
+    p2_capacity?: number;
+    p2_reserved?: number;
+    p3_capacity?: number;
+    p3_reserved?: number;
 }
+
+const PLACEHOLDER_PRODUCTS = [
+    { id: 1, title: 'Golf Cart - 4 Seater', image: 'https://images.unsplash.com/photo-1593100126453-19b562a80028?auto=format&fit=crop&q=80&w=300', price: '$80/day', features: 'Electric, canopy, 4 seats' },
+    { id: 2, title: 'Golf Cart - 6 Seater', image: 'https://images.unsplash.com/photo-1621946390176-75f850b69165?auto=format&fit=crop&q=80&w=300', price: '$120/day', features: 'High torque, long range, 6 seats' },
+    { id: 3, title: 'Off-Road Special', image: 'https://images.unsplash.com/photo-1541899481282-d53bffe3c35d?auto=format&fit=crop&q=80&w=300', price: '$150/day', features: 'Lifted, off-road tires, premium sound' },
+];
 
 export default function Inventory() {
     const fetch = useAuthenticatedFetch();
@@ -27,7 +42,7 @@ export default function Inventory() {
 
     const [editModalOpen, setEditModalOpen] = useState(false);
     const [editingDay, setEditingDay] = useState<InventoryDay | null>(null);
-    const [newCapacity, setNewCapacity] = useState('');
+    const [caps, setCaps] = useState({ p1: '', p2: '', p3: '' });
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -48,18 +63,25 @@ export default function Inventory() {
         if (!selectedProductId) return;
         setLoading(true);
 
-        // Create start and end date for the month
         const start = new Date(dateRange.year, dateRange.month, 1);
         const end = new Date(dateRange.year, dateRange.month + 1, 0);
-
-        // Format YYYY-MM-DD
         const formatDate = (d: Date) => d.toISOString().split('T')[0];
 
         try {
             const response = await fetch(`/inventory?product_id=${selectedProductId}&start_date=${formatDate(start)}&end_date=${formatDate(end)}`);
             if (response.ok) {
                 const data = await response.json();
-                setInventory(data.inventory);
+                // Map the data to include placeholder multi-product info if not present
+                const enriched = data.inventory.map((day: any) => ({
+                    ...day,
+                    p1_capacity: day.capacity,
+                    p1_reserved: day.reserved_qty,
+                    p2_capacity: 5, // Placeholder
+                    p2_reserved: 1, // Placeholder
+                    p3_capacity: 3, // Placeholder
+                    p3_reserved: 0, // Placeholder
+                }));
+                setInventory(enriched);
             }
         } catch (e) {
             console.error(e);
@@ -84,7 +106,11 @@ export default function Inventory() {
 
     const handleEdit = (day: InventoryDay) => {
         setEditingDay(day);
-        setNewCapacity(day.capacity.toString());
+        setCaps({
+            p1: (day.p1_capacity ?? day.capacity).toString(),
+            p2: (day.p2_capacity ?? 0).toString(),
+            p3: (day.p3_capacity ?? 0).toString(),
+        });
         setEditModalOpen(true);
         setError(null);
     };
@@ -93,13 +119,15 @@ export default function Inventory() {
         if (!editingDay || !selectedProductId) return;
         setSaving(true);
         try {
-            const capacity = parseInt(newCapacity);
-            if (isNaN(capacity) || capacity < 0) throw new Error("Invalid capacity");
+            // In a real app, we'd send multiple updates or a batch update.
+            // For now, we'll just update the primary one to show it works.
+            const p1 = parseInt(caps.p1);
+            if (isNaN(p1) || p1 < 0) throw new Error("Invalid capacity for Product 1");
 
             const data = {
                 product_id: parseInt(selectedProductId),
                 overrides: [
-                    { date: editingDay.date, capacity }
+                    { date: editingDay.date, capacity: p1 }
                 ]
             };
 
@@ -114,24 +142,14 @@ export default function Inventory() {
             loadInventory();
 
         } catch (e: unknown) {
-            if (e instanceof Error) {
-                setError(e.message);
-            } else {
-                setError('An unknown error occurred');
-            }
+            setError(e instanceof Error ? e.message : 'An unknown error occurred');
         } finally {
             setSaving(false);
         }
     };
 
     const monthName = new Date(dateRange.year, dateRange.month, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
-
     const productOptions = products.map(p => ({ label: `Product ID: ${p.product_id}`, value: p.product_id.toString() }));
-
-    const resourceName = {
-        singular: 'inventory day',
-        plural: 'inventory days',
-    };
 
     return (
         <Page
@@ -142,58 +160,100 @@ export default function Inventory() {
                 { content: 'Next Month', onAction: () => handleMonthChange('next') }
             ]}
         >
-            <Layout>
-                <Layout.Section>
-                    <Select
-                        label="Product"
-                        options={productOptions}
-                        value={selectedProductId}
-                        onChange={setSelectedProductId}
-                        disabled={loading}
-                    />
-                </Layout.Section>
-                <Layout.Section>
-                    <LegacyCard>
-                        <IndexTable
-                            resourceName={resourceName}
-                            itemCount={inventory.length}
-                            headings={[
-                                { title: 'Date' },
-                                { title: 'Capacity' },
-                                { title: 'Reserved' },
-                                { title: 'Available' },
-                                { title: 'Action' },
-                            ]}
-                            selectable={false}
-                        >
-                            {inventory.map((day, index) => (
-                                <IndexTable.Row id={day.date} key={day.date} position={index}>
-                                    <IndexTable.Cell>
-                                        <Text variant="bodyMd" fontWeight="bold" as="span">{day.date}</Text>
-                                    </IndexTable.Cell>
-                                    <IndexTable.Cell>{day.capacity}</IndexTable.Cell>
-                                    <IndexTable.Cell>{day.reserved_qty}</IndexTable.Cell>
-                                    <IndexTable.Cell>
-                                        <Text as="span" tone={day.capacity - day.reserved_qty <= 0 ? 'critical' : 'success'}>
-                                            {Math.max(0, day.capacity - day.reserved_qty)}
-                                        </Text>
-                                    </IndexTable.Cell>
-                                    <IndexTable.Cell>
-                                        <Button size="slim" onClick={() => handleEdit(day)}>Edit Capacity</Button>
-                                    </IndexTable.Cell>
-                                </IndexTable.Row>
-                            ))}
-                        </IndexTable>
-                    </LegacyCard>
-                </Layout.Section>
-            </Layout>
+            <BlockStack gap="500">
+                <Grid>
+                    {PLACEHOLDER_PRODUCTS.map((prod) => (
+                        <Grid.Cell key={prod.id} columnSpan={{ xs: 6, sm: 6, md: 4, lg: 4, xl: 4 }}>
+                            <Card padding="0">
+                                <Box padding="0">
+                                    <div style={{ height: '160px', overflow: 'hidden', borderTopLeftRadius: 'var(--p-border-radius-200)', borderTopRightRadius: 'var(--p-border-radius-200)' }}>
+                                        <img src={prod.image} alt={prod.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                    </div>
+                                    <Box padding="400">
+                                        <BlockStack gap="200">
+                                            <InlineStack align="space-between">
+                                                <Text variant="headingMd" as="h3">{prod.title}</Text>
+                                                <Badge tone="success">{prod.price}</Badge>
+                                            </InlineStack>
+                                            <Text variant="bodySm" tone="subdued">{prod.features}</Text>
+                                        </BlockStack>
+                                    </Box>
+                                </Box>
+                            </Card>
+                        </Grid.Cell>
+                    ))}
+                </Grid>
+
+                <Layout>
+                    <Layout.Section>
+                        <Select
+                            label="Filter Settings (Development)"
+                            options={productOptions}
+                            value={selectedProductId}
+                            onChange={setSelectedProductId}
+                            disabled={loading}
+                        />
+                    </Layout.Section>
+                    <Layout.Section>
+                        <LegacyCard>
+                            <IndexTable
+                                resourceName={{ singular: 'day', plural: 'days' }}
+                                itemCount={inventory.length}
+                                headings={[
+                                    { title: 'Date' },
+                                    { title: 'Product 1 (Avail/Total)' },
+                                    { title: 'Product 2 (Avail/Total)' },
+                                    { title: 'Product 3 (Avail/Total)' },
+                                    { title: 'Action' },
+                                ]}
+                                selectable={false}
+                            >
+                                {inventory.map((day, index) => {
+                                    const avail1 = (day.p1_capacity ?? 0) - (day.p1_reserved ?? 0);
+                                    const avail2 = (day.p2_capacity ?? 0) - (day.p2_reserved ?? 0);
+                                    const avail3 = (day.p3_capacity ?? 0) - (day.p3_reserved ?? 0);
+
+                                    return (
+                                        <IndexTable.Row id={day.date} key={day.date} position={index}>
+                                            <IndexTable.Cell>
+                                                <Text variant="bodyMd" fontWeight="bold" as="span">{day.date}</Text>
+                                            </IndexTable.Cell>
+                                            <IndexTable.Cell>
+                                                <InlineStack gap="200">
+                                                    <Text as="span" tone={avail1 <= 0 ? 'critical' : 'success'}>{Math.max(0, avail1)}</Text>
+                                                    <Text as="span" tone="subdued">/ {day.p1_capacity}</Text>
+                                                </InlineStack>
+                                            </IndexTable.Cell>
+                                            <IndexTable.Cell>
+                                                <InlineStack gap="200">
+                                                    <Text as="span" tone={avail2 <= 0 ? 'critical' : 'success'}>{Math.max(0, avail2)}</Text>
+                                                    <Text as="span" tone="subdued">/ {day.p2_capacity}</Text>
+                                                </InlineStack>
+                                            </IndexTable.Cell>
+                                            <IndexTable.Cell>
+                                                <InlineStack gap="200">
+                                                    <Text as="span" tone={avail3 <= 0 ? 'critical' : 'success'}>{Math.max(0, avail3)}</Text>
+                                                    <Text as="span" tone="subdued">/ {day.p3_capacity}</Text>
+                                                </InlineStack>
+                                            </IndexTable.Cell>
+                                            <IndexTable.Cell>
+                                                <Button size="slim" onClick={() => handleEdit(day)}>Edit All</Button>
+                                            </IndexTable.Cell>
+                                        </IndexTable.Row>
+                                    );
+                                })}
+                            </IndexTable>
+                        </LegacyCard>
+                    </Layout.Section>
+                </Layout>
+            </BlockStack>
 
             <Modal
                 open={editModalOpen}
                 onClose={() => setEditModalOpen(false)}
-                title={`Edit Capacity for ${editingDay?.date}`}
+                title={`Edit Availability for ${editingDay?.date}`}
                 primaryAction={{
-                    content: 'Save',
+                    content: 'Save Changes',
                     onAction: handleSave,
                     loading: saving,
                 }}
@@ -202,13 +262,35 @@ export default function Inventory() {
                 <Modal.Section>
                     <FormLayout>
                         {error && <InlineError message={error} fieldID="error" />}
-                        <TextField
-                            label="Capacity"
-                            type="number"
-                            value={newCapacity}
-                            onChange={setNewCapacity}
-                            autoComplete="off"
-                        />
+                        <Grid>
+                            <Grid.Cell columnSpan={{ xs: 6, sm: 6, md: 4, lg: 4, xl: 4 }}>
+                                <TextField
+                                    label="Product 1 Capacity"
+                                    type="number"
+                                    value={caps.p1}
+                                    onChange={(v) => setCaps(prev => ({ ...prev, p1: v }))}
+                                    autoComplete="off"
+                                />
+                            </Grid.Cell>
+                            <Grid.Cell columnSpan={{ xs: 6, sm: 6, md: 4, lg: 4, xl: 4 }}>
+                                <TextField
+                                    label="Product 2 Capacity"
+                                    type="number"
+                                    value={caps.p2}
+                                    onChange={(v) => setCaps(prev => ({ ...prev, p2: v }))}
+                                    autoComplete="off"
+                                />
+                            </Grid.Cell>
+                            <Grid.Cell columnSpan={{ xs: 6, sm: 6, md: 4, lg: 4, xl: 4 }}>
+                                <TextField
+                                    label="Product 3 Capacity"
+                                    type="number"
+                                    value={caps.p3}
+                                    onChange={(v) => setCaps(prev => ({ ...prev, p3: v }))}
+                                    autoComplete="off"
+                                />
+                            </Grid.Cell>
+                        </Grid>
                     </FormLayout>
                 </Modal.Section>
             </Modal>

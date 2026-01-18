@@ -1,4 +1,4 @@
-import { Page, Layout, LegacyCard, IndexTable, Text, Select, Button, Modal, TextField, FormLayout, InlineError, Badge, Grid, Card, BlockStack, InlineStack, Box } from '@shopify/polaris';
+import { Page, Layout, LegacyCard, IndexTable, Text, Select, Button, Modal, TextField, FormLayout, InlineError, Badge, Grid, Card, BlockStack, InlineStack, Box, Divider } from '@shopify/polaris';
 import { useAuthenticatedFetch } from '../api';
 import { useEffect, useState, useCallback } from 'react';
 
@@ -9,11 +9,20 @@ interface ProductInfo {
     default_capacity: number;
 }
 
+interface ProductDefinition {
+    id: number;
+    title: string;
+    image: string;
+    price: string;
+    features: string;
+    totalAvailability: number;
+    shopifyProductId: string;
+}
+
 interface InventoryDay {
     date: string;
-    capacity: number; // For product 1 (backward compat or generic)
+    capacity: number;
     reserved_qty: number;
-    // Multi-product support
     p1_capacity?: number;
     p1_reserved?: number;
     p2_capacity?: number;
@@ -22,10 +31,10 @@ interface InventoryDay {
     p3_reserved?: number;
 }
 
-const PLACEHOLDER_PRODUCTS = [
-    { id: 1, title: 'Golf Cart - 4 Seater', image: 'https://images.unsplash.com/photo-1593100126453-19b562a80028?auto=format&fit=crop&q=80&w=300', price: '$80/day', features: 'Electric, canopy, 4 seats' },
-    { id: 2, title: 'Golf Cart - 6 Seater', image: 'https://images.unsplash.com/photo-1621946390176-75f850b69165?auto=format&fit=crop&q=80&w=300', price: '$120/day', features: 'High torque, long range, 6 seats' },
-    { id: 3, title: 'Off-Road Special', image: 'https://images.unsplash.com/photo-1541899481282-d53bffe3c35d?auto=format&fit=crop&q=80&w=300', price: '$150/day', features: 'Lifted, off-road tires, premium sound' },
+const INITIAL_PRODUCTS: ProductDefinition[] = [
+    { id: 1, title: 'Golf Cart - 4 Seater', image: 'https://images.unsplash.com/photo-1593100126453-19b562a80028?auto=format&fit=crop&q=80&w=300', price: '$80/day', features: 'Electric, canopy, 4 seats', totalAvailability: 10, shopifyProductId: '' },
+    { id: 2, title: 'Golf Cart - 6 Seater', image: 'https://images.unsplash.com/photo-1621946390176-75f850b69165?auto=format&fit=crop&q=80&w=300', price: '$120/day', features: 'High torque, long range, 6 seats', totalAvailability: 5, shopifyProductId: '' },
+    { id: 3, title: 'Off-Road Special', image: 'https://images.unsplash.com/photo-1541899481282-d53bffe3c35d?auto=format&fit=crop&q=80&w=300', price: '$150/day', features: 'Lifted, off-road tires, premium sound', totalAvailability: 3, shopifyProductId: '' },
 ];
 
 export default function Inventory() {
@@ -33,8 +42,9 @@ export default function Inventory() {
     const [products, setProducts] = useState<ProductInfo[]>([]);
     const [selectedProductId, setSelectedProductId] = useState<string>('');
 
+    const [productDefinitions, setProductDefinitions] = useState<ProductDefinition[]>(INITIAL_PRODUCTS);
     const [inventory, setInventory] = useState<InventoryDay[]>([]);
-    const [loading, setLoading] = useState(false);
+    const [, setLoading] = useState(false);
     const [dateRange, setDateRange] = useState({
         month: new Date().getMonth(),
         year: new Date().getFullYear()
@@ -43,10 +53,18 @@ export default function Inventory() {
     const [editModalOpen, setEditModalOpen] = useState(false);
     const [editingDay, setEditingDay] = useState<InventoryDay | null>(null);
     const [caps, setCaps] = useState({ p1: '', p2: '', p3: '' });
+
+    // Product Settings State
+    const [productSettingsModalOpen, setProductSettingsModalOpen] = useState(false);
+    const [editingProduct, setEditingProduct] = useState<ProductDefinition | null>(null);
+    const [tempProdTitle, setTempProdTitle] = useState('');
+    const [tempProdAvailability, setTempProdAvailability] = useState('');
+    const [tempShopifyId, setTempShopifyId] = useState('');
+
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // Load products
+    // Load shopify products for linking
     useEffect(() => {
         fetch('/products').then(async (res) => {
             if (res.ok) {
@@ -60,7 +78,8 @@ export default function Inventory() {
     }, [fetch, selectedProductId]);
 
     const loadInventory = useCallback(async () => {
-        if (!selectedProductId) return;
+        // We use selectedProductId as a driver for the API call to get some dates
+        const driverId = selectedProductId || (products.length > 0 ? products[0].product_id.toString() : '1');
         setLoading(true);
 
         const start = new Date(dateRange.year, dateRange.month, 1);
@@ -68,18 +87,17 @@ export default function Inventory() {
         const formatDate = (d: Date) => d.toISOString().split('T')[0];
 
         try {
-            const response = await fetch(`/inventory?product_id=${selectedProductId}&start_date=${formatDate(start)}&end_date=${formatDate(end)}`);
+            const response = await fetch(`/inventory?product_id=${driverId}&start_date=${formatDate(start)}&end_date=${formatDate(end)}`);
             if (response.ok) {
                 const data = await response.json();
-                // Map the data to include placeholder multi-product info if not present
-                const enriched = data.inventory.map((day: any) => ({
+                const enriched = data.inventory.map((day: InventoryDay) => ({
                     ...day,
                     p1_capacity: day.capacity,
                     p1_reserved: day.reserved_qty,
-                    p2_capacity: 5, // Placeholder
-                    p2_reserved: 1, // Placeholder
-                    p3_capacity: 3, // Placeholder
-                    p3_reserved: 0, // Placeholder
+                    p2_capacity: productDefinitions[1].totalAvailability,
+                    p2_reserved: 1,
+                    p3_capacity: productDefinitions[2].totalAvailability,
+                    p3_reserved: 0,
                 }));
                 setInventory(enriched);
             }
@@ -88,7 +106,7 @@ export default function Inventory() {
         } finally {
             setLoading(false);
         }
-    }, [fetch, selectedProductId, dateRange]);
+    }, [fetch, selectedProductId, products, dateRange, productDefinitions]);
 
     useEffect(() => {
         loadInventory();
@@ -104,7 +122,7 @@ export default function Inventory() {
         });
     };
 
-    const handleEdit = (day: InventoryDay) => {
+    const handleEditDay = (day: InventoryDay) => {
         setEditingDay(day);
         setCaps({
             p1: (day.p1_capacity ?? day.capacity).toString(),
@@ -115,12 +133,10 @@ export default function Inventory() {
         setError(null);
     };
 
-    const handleSave = async () => {
+    const handleSaveDay = async () => {
         if (!editingDay || !selectedProductId) return;
         setSaving(true);
         try {
-            // In a real app, we'd send multiple updates or a batch update.
-            // For now, we'll just update the primary one to show it works.
             const p1 = parseInt(caps.p1);
             if (isNaN(p1) || p1 < 0) throw new Error("Invalid capacity for Product 1");
 
@@ -148,8 +164,37 @@ export default function Inventory() {
         }
     };
 
+    const handleEditProduct = (prod: ProductDefinition) => {
+        setEditingProduct(prod);
+        setTempProdTitle(prod.title);
+        setTempProdAvailability(prod.totalAvailability.toString());
+        setTempShopifyId(prod.shopifyProductId);
+        setProductSettingsModalOpen(true);
+        setError(null);
+    };
+
+    const handleSaveProductSettings = () => {
+        if (!editingProduct) return;
+
+        const availability = parseInt(tempProdAvailability);
+        if (isNaN(availability) || availability < 0) {
+            setError("Invalid total availability");
+            return;
+        }
+
+        setProductDefinitions(prev => prev.map(p =>
+            p.id === editingProduct.id
+                ? { ...p, title: tempProdTitle, totalAvailability: availability, shopifyProductId: tempShopifyId }
+                : p
+        ));
+
+        setProductSettingsModalOpen(false);
+        setEditingProduct(null);
+    };
+
     const monthName = new Date(dateRange.year, dateRange.month, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
-    const productOptions = products.map(p => ({ label: `Product ID: ${p.product_id}`, value: p.product_id.toString() }));
+    const shopifyProductOptions = products.map(p => ({ label: `${p.title} (ID: ${p.product_id})`, value: p.product_id.toString() }));
+    shopifyProductOptions.unshift({ label: 'Select a Shopify Product', value: '' });
 
     return (
         <Page
@@ -162,7 +207,7 @@ export default function Inventory() {
         >
             <BlockStack gap="500">
                 <Grid>
-                    {PLACEHOLDER_PRODUCTS.map((prod) => (
+                    {productDefinitions.map((prod) => (
                         <Grid.Cell key={prod.id} columnSpan={{ xs: 6, sm: 6, md: 4, lg: 4, xl: 4 }}>
                             <Card padding="0">
                                 <Box padding="0">
@@ -176,6 +221,11 @@ export default function Inventory() {
                                                 <Badge tone="success">{prod.price}</Badge>
                                             </InlineStack>
                                             <Text variant="bodySm" tone="subdued" as="p">{prod.features}</Text>
+                                            <Divider />
+                                            <InlineStack align="space-between">
+                                                <Text variant="bodySm" tone="subdued" as="p">Capacity: <b>{prod.totalAvailability}</b></Text>
+                                                <Button variant="plain" onClick={() => handleEditProduct(prod)}>Edit settings</Button>
+                                            </InlineStack>
                                         </BlockStack>
                                     </Box>
                                 </Box>
@@ -186,24 +236,15 @@ export default function Inventory() {
 
                 <Layout>
                     <Layout.Section>
-                        <Select
-                            label="Filter Settings (Development)"
-                            options={productOptions}
-                            value={selectedProductId}
-                            onChange={setSelectedProductId}
-                            disabled={loading}
-                        />
-                    </Layout.Section>
-                    <Layout.Section>
                         <LegacyCard>
                             <IndexTable
                                 resourceName={{ singular: 'day', plural: 'days' }}
                                 itemCount={inventory.length}
                                 headings={[
                                     { title: 'Date' },
-                                    { title: 'Product 1 (Avail/Total)' },
-                                    { title: 'Product 2 (Avail/Total)' },
-                                    { title: 'Product 3 (Avail/Total)' },
+                                    { title: `${productDefinitions[0].title} (Avail/Total)` },
+                                    { title: `${productDefinitions[1].title} (Avail/Total)` },
+                                    { title: `${productDefinitions[2].title} (Avail/Total)` },
                                     { title: 'Action' },
                                 ]}
                                 selectable={false}
@@ -237,7 +278,7 @@ export default function Inventory() {
                                                 </InlineStack>
                                             </IndexTable.Cell>
                                             <IndexTable.Cell>
-                                                <Button size="slim" onClick={() => handleEdit(day)}>Edit All</Button>
+                                                <Button size="slim" onClick={() => handleEditDay(day)}>Update Avail.</Button>
                                             </IndexTable.Cell>
                                         </IndexTable.Row>
                                     );
@@ -248,13 +289,14 @@ export default function Inventory() {
                 </Layout>
             </BlockStack>
 
+            {/* Daily Availability Modal */}
             <Modal
                 open={editModalOpen}
                 onClose={() => setEditModalOpen(false)}
                 title={`Edit Availability for ${editingDay?.date}`}
                 primaryAction={{
                     content: 'Save Changes',
-                    onAction: handleSave,
+                    onAction: handleSaveDay,
                     loading: saving,
                 }}
                 secondaryActions={[{ content: 'Cancel', onAction: () => setEditModalOpen(false) }]}
@@ -265,7 +307,7 @@ export default function Inventory() {
                         <Grid>
                             <Grid.Cell columnSpan={{ xs: 6, sm: 6, md: 4, lg: 4, xl: 4 }}>
                                 <TextField
-                                    label="Product 1 Capacity"
+                                    label={`${productDefinitions[0].title} Capacity`}
                                     type="number"
                                     value={caps.p1}
                                     onChange={(v) => setCaps(prev => ({ ...prev, p1: v }))}
@@ -274,7 +316,7 @@ export default function Inventory() {
                             </Grid.Cell>
                             <Grid.Cell columnSpan={{ xs: 6, sm: 6, md: 4, lg: 4, xl: 4 }}>
                                 <TextField
-                                    label="Product 2 Capacity"
+                                    label={`${productDefinitions[1].title} Capacity`}
                                     type="number"
                                     value={caps.p2}
                                     onChange={(v) => setCaps(prev => ({ ...prev, p2: v }))}
@@ -283,7 +325,7 @@ export default function Inventory() {
                             </Grid.Cell>
                             <Grid.Cell columnSpan={{ xs: 6, sm: 6, md: 4, lg: 4, xl: 4 }}>
                                 <TextField
-                                    label="Product 3 Capacity"
+                                    label={`${productDefinitions[2].title} Capacity`}
                                     type="number"
                                     value={caps.p3}
                                     onChange={(v) => setCaps(prev => ({ ...prev, p3: v }))}
@@ -291,6 +333,46 @@ export default function Inventory() {
                                 />
                             </Grid.Cell>
                         </Grid>
+                    </FormLayout>
+                </Modal.Section>
+            </Modal>
+
+            {/* Product Settings Modal */}
+            <Modal
+                open={productSettingsModalOpen}
+                onClose={() => setProductSettingsModalOpen(false)}
+                title={`Product Settings: ${editingProduct?.title}`}
+                primaryAction={{
+                    content: 'Save Settings',
+                    onAction: handleSaveProductSettings,
+                }}
+                secondaryActions={[{ content: 'Cancel', onAction: () => setProductSettingsModalOpen(false) }]}
+            >
+                <Modal.Section>
+                    <FormLayout>
+                        {error && <InlineError message={error} fieldID="error" />}
+                        <TextField
+                            label="Local Product Name"
+                            value={tempProdTitle}
+                            onChange={setTempProdTitle}
+                            autoComplete="off"
+                            helpText="How this product will be named within the app."
+                        />
+                        <TextField
+                            label="Total Availability"
+                            type="number"
+                            value={tempProdAvailability}
+                            onChange={setTempProdAvailability}
+                            autoComplete="off"
+                            helpText="The base capacity of this product."
+                        />
+                        <Select
+                            label="Link Shopify Product"
+                            options={shopifyProductOptions}
+                            value={tempShopifyId}
+                            onChange={setTempShopifyId}
+                            helpText="Connect this to an actual Shopify product for sync."
+                        />
                     </FormLayout>
                 </Modal.Section>
             </Modal>

@@ -32,7 +32,8 @@ const DASHBOARD_STYLES = `
         flex-direction: column;
         flex: 1;
     }
-    .full-height-card-wrapper .Polaris-Card .Polaris-Box {
+    .full-height-card-wrapper .Polaris-Card > .Polaris-Box,
+    .full-height-card-wrapper .Polaris-Card > .Polaris-Box > div {
         flex: 1;
         display: flex;
         flex-direction: column;
@@ -41,6 +42,12 @@ const DASHBOARD_STYLES = `
     .full-height-card-wrapper .Polaris-Card .Polaris-BlockStack,
     .full-height-card-wrapper .Polaris-Card .Polaris-InlineStack {
         flex: 1;
+    }
+    /* Ensure the calendar grid specifically stretches */
+    .full-height-card-wrapper #calendar-box > div {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
     }
 `;
 

@@ -75,7 +75,7 @@ export default function Bookings() {
         } finally {
             setLoading(false);
         }
-    }, [fetch, selectedTab]);
+    }, [fetch, selectedTab, searchQuery]);
 
     useEffect(() => {
         loadBookings();

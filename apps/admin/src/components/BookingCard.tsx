@@ -73,7 +73,7 @@ export function BookingCard({ booking }: BookingCardProps) {
                             Location: {booking.location_code}
                         </Text>
                         <div style={{ marginTop: '4px' }}>
-                            <Badge tone={badgeTone as any}>{booking.status}</Badge>
+                            <Badge tone={badgeTone as 'info' | 'success' | 'critical'}>{booking.status}</Badge>
                         </div>
                     </BlockStack>
                 </InlineStack>

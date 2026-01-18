@@ -63,82 +63,80 @@ export function BookingsCalendar({ bookings = [] }: BookingsCalendarProps) {
     const today = new Date();
 
     return (
-        <div style={{ height: '100%', width: '100%' }}>
-            <Card>
-                <Box padding="400" id="calendar-box">
-                    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', flex: 1 }}>
-                        {/* Month Navigation */}
-                        <div style={{ marginBottom: '16px' }}>
-                            <InlineStack align="space-between" blockAlign="center">
-                                <Text as="h2" variant="headingLg">{monthName} {year}</Text>
-                                <InlineStack gap="200">
-                                    <Button icon={ArrowLeftIcon} variant="plain" onClick={handlePrevMonth} />
-                                    <Button icon={ArrowRightIcon} variant="plain" onClick={handleNextMonth} />
-                                </InlineStack>
-                            </InlineStack>
+        <Card>
+            <Box padding="400" id="calendar-box">
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    {/* Month Navigation */}
+                    <div style={{ marginBottom: '16px' }}>
+                        <InlineStack align="space-between" blockAlign="center">
+                            <Text as="h2" variant="headingLg">{monthName} {year}</Text>
                             <InlineStack gap="200">
-                                <Badge tone="info">{`${currentMonthBookings} booking${currentMonthBookings !== 1 ? 's' : ''}`}</Badge>
-                                {/* Simplified "upcoming" text */}
+                                <Button icon={ArrowLeftIcon} variant="plain" onClick={handlePrevMonth} />
+                                <Button icon={ArrowRightIcon} variant="plain" onClick={handleNextMonth} />
                             </InlineStack>
-                        </div>
-
-                        {/* Calendar Grid */}
-                        <div style={{
-                            display: 'grid',
-                            gridTemplateColumns: 'repeat(7, 1fr)',
-                            gridTemplateRows: 'auto repeat(6, 1fr)',
-                            gap: '8px',
-                            textAlign: 'right',
-                            flex: 1
-                        }}>
-                            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
-                                <div key={d} style={{ fontWeight: 600, padding: '8px', color: '#5c5f62' }}>{d}</div>
-                            ))}
-                            {calendarData.map((d, index) => {
-                                const isToday = d.date.toDateString() === today.toDateString();
-                                return (
-                                    <div key={index} style={{
-                                        minHeight: '60px',
-                                        border: '1px solid #e1e3e5',
-                                        borderRadius: '4px',
-                                        padding: '8px',
-                                        backgroundColor: d.month === 'curr' ? 'white' : '#f9fafb',
-                                        color: d.month === 'curr' ? 'black' : '#8c9196',
-                                        fontSize: '14px',
-                                        position: 'relative',
-                                        display: 'flex',
-                                        flexDirection: 'column'
-                                    }}>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                                            {d.count > 0 && (
-                                                <div style={{
-                                                    background: '#c1f3d3', color: '#0d5428',
-                                                    borderRadius: '50%', width: '16px', height: '16px',
-                                                    fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center'
-                                                }}>
-                                                    {d.count}
-                                                </div>
-                                            )}
-                                            <span style={{
-                                                fontWeight: isToday ? 'bold' : 'normal',
-                                                backgroundColor: isToday ? '#303030' : 'transparent',
-                                                color: isToday ? 'white' : 'inherit',
-                                                borderRadius: '50%',
-                                                width: '24px',
-                                                height: '24px',
-                                                display: 'inline-flex',
-                                                alignItems: 'center',
-                                                justifyContent: 'center',
-                                                marginLeft: 'auto'
-                                            }}>{d.day}</span>
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
+                        </InlineStack>
+                        <InlineStack gap="200">
+                            <Badge tone="info">{`${currentMonthBookings} booking${currentMonthBookings !== 1 ? 's' : ''}`}</Badge>
+                            {/* Simplified "upcoming" text */}
+                        </InlineStack>
                     </div>
-                </Box>
-            </Card>
-        </div>
+
+                    {/* Calendar Grid */}
+                    <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(7, 1fr)',
+                        gridTemplateRows: 'auto repeat(6, 1fr)',
+                        gap: '8px',
+                        textAlign: 'right',
+                        flex: 1
+                    }}>
+                        {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
+                            <div key={d} style={{ fontWeight: 600, padding: '8px', color: '#5c5f62' }}>{d}</div>
+                        ))}
+                        {calendarData.map((d, index) => {
+                            const isToday = d.date.toDateString() === today.toDateString();
+                            return (
+                                <div key={index} style={{
+                                    minHeight: '60px',
+                                    border: '1px solid #e1e3e5',
+                                    borderRadius: '4px',
+                                    padding: '8px',
+                                    backgroundColor: d.month === 'curr' ? 'white' : '#f9fafb',
+                                    color: d.month === 'curr' ? 'black' : '#8c9196',
+                                    fontSize: '14px',
+                                    position: 'relative',
+                                    display: 'flex',
+                                    flexDirection: 'column'
+                                }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                        {d.count > 0 && (
+                                            <div style={{
+                                                background: '#c1f3d3', color: '#0d5428',
+                                                borderRadius: '50%', width: '16px', height: '16px',
+                                                fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                            }}>
+                                                {d.count}
+                                            </div>
+                                        )}
+                                        <span style={{
+                                            fontWeight: isToday ? 'bold' : 'normal',
+                                            backgroundColor: isToday ? '#303030' : 'transparent',
+                                            color: isToday ? 'white' : 'inherit',
+                                            borderRadius: '50%',
+                                            width: '24px',
+                                            height: '24px',
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            marginLeft: 'auto'
+                                        }}>{d.day}</span>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            </Box>
+        </Card>
     );
 }

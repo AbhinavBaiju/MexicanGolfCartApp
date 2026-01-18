@@ -1,4 +1,4 @@
-import { Page, Layout, LegacyCard, ResourceList, ResourceItem, Text, Badge, LegacyFilters, ChoiceList } from '@shopify/polaris';
+import { Page, Layout, LegacyCard, ResourceList, ResourceItem, Text, Badge } from '@shopify/polaris';
 import { useAuthenticatedFetch } from '../api';
 import { useEffect, useState, useCallback } from 'react';
 
@@ -17,27 +17,18 @@ export default function Bookings() {
     const fetch = useAuthenticatedFetch();
     const [bookings, setBookings] = useState<Booking[]>([]);
     const [loading, setLoading] = useState(true);
-    const [queryValue, setQueryValue] = useState('');
-    const [statusFilter, setStatusFilter] = useState<string[]>([]);
+    const [showAbandoned, setShowAbandoned] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
     const loadBookings = useCallback(async () => {
         setLoading(true);
         try {
             const params = new URLSearchParams();
-            if (statusFilter.length > 0) {
-                // Backend currently only supports single status query param? 
-                // handleBookingsGet: const status = url.searchParams.get('status');
-                // So we can only filter by one status at a time in backend, or filtering client side.
-                // Let's filter client side for multiple, or just pass the first one.
-                // Let's pass the first one for now or rethink.
-                // Actually, let's just fetch all (or recent) and filter client side if the list is small, 
-                // but backend limits? No explicit limit in `handleBookingsGet` SQL (oops).
-                // It might return too many. But for now it's fine.
-                // Let's try to use backend filter if single status selected.
-                if (statusFilter.length === 1) {
-                    params.append('status', statusFilter[0]);
-                }
+            // User requested strict views
+            if (showAbandoned) {
+                params.append('status', 'EXPIRED');
+            } else {
+                params.append('status', 'CONFIRMED');
             }
 
             const response = await fetch(`/bookings?${params.toString()}`);
@@ -57,65 +48,11 @@ export default function Bookings() {
         } finally {
             setLoading(false);
         }
-    }, [fetch, statusFilter]);
+    }, [fetch, showAbandoned]);
 
     useEffect(() => {
         loadBookings();
     }, [loadBookings]);
-
-    const handleStatusChange = useCallback(
-        (value: string[]) => setStatusFilter(value),
-        [],
-    );
-
-    const handleStatusRemove = useCallback(() => setStatusFilter([]), []);
-    const handleQueryValueRemove = useCallback(() => setQueryValue(''), []);
-
-    const filters = [
-        {
-            key: 'status',
-            label: 'Status',
-            filter: (
-                <ChoiceList
-                    title="Status"
-                    titleHidden
-                    choices={[
-                        { label: 'Hold', value: 'HOLD' },
-                        { label: 'Confirmed', value: 'CONFIRMED' },
-                        { label: 'Released', value: 'RELEASED' },
-                        { label: 'Expired', value: 'EXPIRED' },
-                        { label: 'Invalid', value: 'INVALID' },
-                        { label: 'Cancelled', value: 'CANCELLED' },
-                    ]}
-                    selected={statusFilter}
-                    onChange={handleStatusChange}
-                    allowMultiple
-                />
-            ),
-            shortcut: true,
-        },
-    ];
-
-    const appliedFilters = [];
-    if (statusFilter.length > 0) {
-        const key = 'status';
-        appliedFilters.push({
-            key,
-            label: `Status: ${statusFilter.join(', ')}`,
-            onRemove: handleStatusRemove,
-        });
-    }
-
-    // Client-side filtering for search query (token) or multiple statuses if backend didn't handle it
-    const filteredBookings = bookings.filter((booking) => {
-        const matchesStatus = statusFilter.length === 0 || statusFilter.includes(booking.status);
-        const matchesQuery = queryValue === '' ||
-            booking.booking_token.toLowerCase().includes(queryValue.toLowerCase()) ||
-            booking.order_id?.toString().includes(queryValue) ||
-            booking.start_date.includes(queryValue);
-
-        return matchesStatus && matchesQuery;
-    });
 
     const resourceName = {
         singular: 'booking',
@@ -123,28 +60,24 @@ export default function Bookings() {
     };
 
     return (
-        <Page title="Bookings">
+        <Page
+            title={showAbandoned ? "Abandoned Bookings" : "Bookings"}
+            secondaryActions={[
+                {
+                    content: showAbandoned ? 'Show Confirmed Bookings' : 'Show Abandoned Bookings',
+                    onAction: () => setShowAbandoned(!showAbandoned),
+                    accessibilityLabel: showAbandoned ? 'Switch to confirmed bookings' : 'Switch to abandoned bookings',
+                }
+            ]}
+        >
             <Layout>
                 <Layout.Section>
                     <LegacyCard>
                         {error && <div style={{ padding: '1rem', color: 'red' }}><Text as="p" tone="critical">{error}</Text></div>}
                         <ResourceList
                             resourceName={resourceName}
-                            items={filteredBookings}
+                            items={bookings}
                             loading={loading}
-                            filterControl={
-                                <LegacyFilters
-                                    queryValue={queryValue}
-                                    filters={filters}
-                                    appliedFilters={appliedFilters}
-                                    onQueryChange={setQueryValue}
-                                    onQueryClear={handleQueryValueRemove}
-                                    onClearAll={() => {
-                                        handleStatusRemove();
-                                        handleQueryValueRemove();
-                                    }}
-                                />
-                            }
                             renderItem={(item) => {
                                 const { booking_token, status, start_date, end_date, location_code, order_id } = item;
                                 let badgeTone = 'info';
@@ -156,7 +89,7 @@ export default function Bookings() {
                                     <ResourceItem
                                         id={booking_token}
                                         url="#"
-                                        onClick={() => { }} // TODO: Navigate to detail
+                                        onClick={() => { }}
                                         accessibilityLabel={`View details for ${booking_token}`}
                                         name={booking_token}
                                     >

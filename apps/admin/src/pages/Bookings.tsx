@@ -1,34 +1,47 @@
-import { Page, Layout, LegacyCard, ResourceList, ResourceItem, Text, Badge } from '@shopify/polaris';
+import { Page, Layout, Badge, Tabs, TextField, InlineStack, Button, Box, Text, Spinner } from '@shopify/polaris';
 import { useAuthenticatedFetch } from '../api';
 import { useEffect, useState, useCallback } from 'react';
-
-interface Booking {
-    booking_token: string;
-    status: string;
-    location_code: string;
-    start_date: string;
-    end_date: string;
-    order_id: number | null;
-    invalid_reason: string | null;
-    created_at: string;
-}
+import { BookingCard, type Booking } from '../components/BookingCard';
+import { SearchIcon, ExportIcon, ArrowUpIcon } from '@shopify/polaris-icons';
 
 export default function Bookings() {
     const fetch = useAuthenticatedFetch();
     const [bookings, setBookings] = useState<Booking[]>([]);
     const [loading, setLoading] = useState(true);
-    const [showAbandoned, setShowAbandoned] = useState(false);
+    const [selectedTab, setSelectedTab] = useState(0);
     const [error, setError] = useState<string | null>(null);
+    const [searchQuery, setSearchQuery] = useState('');
+
+    // Tabs mapping
+    // 0: Bookings (Confirmed)
+    // 1: Canceled (Cancelled)
+    // 2: Abandoned (Expired)
+    const tabs = [
+        { id: 'bookings', content: 'Bookings', panelID: 'bookings-content' },
+        { id: 'canceled', content: 'Canceled', panelID: 'canceled-content' },
+        { id: 'abandoned', content: 'Abandoned', panelID: 'abandoned-content' },
+    ];
 
     const loadBookings = useCallback(async () => {
         setLoading(true);
         try {
             const params = new URLSearchParams();
-            // User requested strict views
-            if (showAbandoned) {
-                params.append('status', 'EXPIRED');
-            } else {
+
+            // Map tabs to statuses
+            if (selectedTab === 0) {
                 params.append('status', 'CONFIRMED');
+            } else if (selectedTab === 1) {
+                params.append('status', 'CANCELLED');
+            } else if (selectedTab === 2) {
+                params.append('status', 'EXPIRED');
+            }
+            // Add other statuses as needed
+
+            if (searchQuery) {
+                // Assuming backend supports 'query' or generic search. If not, client-side filter might be needed.
+                // For now, let's assuming we filter client side if backend doesn't support it, 
+                // BUT the fetch is the only way to get data. 
+                // Let's rely on status first.
             }
 
             const response = await fetch(`/bookings?${params.toString()}`);
@@ -48,64 +61,93 @@ export default function Bookings() {
         } finally {
             setLoading(false);
         }
-    }, [fetch, showAbandoned]);
+    }, [fetch, selectedTab]);
 
     useEffect(() => {
         loadBookings();
     }, [loadBookings]);
 
-    const resourceName = {
-        singular: 'booking',
-        plural: 'bookings',
-    };
+    // Handle client-side filtering safely if backend search isn't ready
+    const filteredBookings = bookings.filter(b => {
+        if (!searchQuery) return true;
+        const q = searchQuery.toLowerCase();
+        return b.booking_token.toLowerCase().includes(q) ||
+            b.location_code.toLowerCase().includes(q) ||
+            (b.order_id && b.order_id.toString().includes(q));
+    });
 
     return (
-        <Page
-            title={showAbandoned ? "Abandoned Bookings" : "Bookings"}
-            secondaryActions={[
-                {
-                    content: showAbandoned ? 'Show Confirmed Bookings' : 'Show Abandoned Bookings',
-                    onAction: () => setShowAbandoned(!showAbandoned),
-                    accessibilityLabel: showAbandoned ? 'Switch to confirmed bookings' : 'Switch to abandoned bookings',
-                }
-            ]}
-        >
+        <Page fullWidth>
+            <div style={{ marginBottom: '20px' }}>
+                <InlineStack align="space-between" blockAlign="center">
+                    <InlineStack gap="200" align="center">
+                        <Text as="h1" variant="headingLg">Bookings</Text>
+                        <Badge tone="info">{filteredBookings.length.toString()}</Badge>
+                    </InlineStack>
+                    <Button icon={ExportIcon}>Manual booking</Button>
+                </InlineStack>
+            </div>
+
             <Layout>
                 <Layout.Section>
-                    <LegacyCard>
-                        {error && <div style={{ padding: '1rem', color: 'red' }}><Text as="p" tone="critical">{error}</Text></div>}
-                        <ResourceList
-                            resourceName={resourceName}
-                            items={bookings}
-                            loading={loading}
-                            renderItem={(item) => {
-                                const { booking_token, status, start_date, end_date, location_code, order_id } = item;
-                                let badgeTone = 'info';
-                                if (status === 'CONFIRMED') badgeTone = 'success';
-                                if (status === 'EXPIRED' || status === 'RELEASED') badgeTone = 'subdued';
-                                if (status === 'INVALID' || status === 'CANCELLED') badgeTone = 'critical';
+                    <Tabs tabs={tabs} selected={selectedTab} onSelect={setSelectedTab}>
+                        <Box paddingBlockStart="400">
+                            {/* Filter Bar */}
+                            <div style={{ background: 'white', padding: '12px', borderRadius: '8px', border: '1px solid #e1e3e5', marginBottom: '20px' }}>
+                                <InlineStack gap="300" align="space-between">
+                                    <div style={{ flexGrow: 1, maxWidth: '400px' }}>
+                                        <TextField
+                                            label="Search"
+                                            labelHidden
+                                            placeholder="Filter by customer name or email"
+                                            value={searchQuery}
+                                            onChange={setSearchQuery}
+                                            autoComplete="off"
+                                            prefix={<SearchIcon />}
+                                        />
+                                    </div>
+                                    <InlineStack gap="200">
+                                        {/* Mock filters to match screenshot */}
+                                        <Button variant="secondary">Upcoming</Button>
+                                        <Button variant="secondary" disclosure>All services</Button>
+                                        <Button variant="secondary" disclosure>All types</Button>
+                                        <Button variant="secondary" disclosure>All statuses</Button>
+                                        <Button icon={ArrowUpIcon} />
+                                        <Button icon={ExportIcon}>Export</Button>
+                                    </InlineStack>
+                                </InlineStack>
+                            </div>
 
-                                return (
-                                    <ResourceItem
-                                        id={booking_token}
-                                        url="#"
-                                        onClick={() => { }}
-                                        accessibilityLabel={`View details for ${booking_token}`}
-                                        name={booking_token}
-                                    >
-                                        <Text variant="bodyMd" fontWeight="bold" as="h3">
-                                            {start_date} to {end_date}
-                                        </Text>
-                                        <div>Location: {location_code}</div>
-                                        {order_id && <div>Order: {order_id}</div>}
-                                        <div>Token: {booking_token.substring(0, 8)}...</div>
-                                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                                        <Badge tone={badgeTone as any}>{status}</Badge>
-                                    </ResourceItem>
-                                );
-                            }}
-                        />
-                    </LegacyCard>
+                            {/* Booking List */}
+                            {loading ? (
+                                <Box padding="1600" width="100%">
+                                    <InlineStack align="center" blockAlign="center">
+                                        <Spinner size="large" />
+                                    </InlineStack>
+                                </Box>
+                            ) : error ? (
+                                <Box padding="400">
+                                    <Text as="p" tone="critical">{error}</Text>
+                                </Box>
+                            ) : filteredBookings.length === 0 ? (
+                                <Box padding="3200" width="100%">
+                                    <InlineStack align="center" blockAlign="center" gap="400">
+                                        <div style={{ textAlign: 'center' }}>
+                                            <SearchIcon style={{ width: 48, height: 48, color: '#8c9196' }} />
+                                            <Text as="h2" variant="headingMd">No bookings found</Text>
+                                            <Text as="p" tone="subdued">Try changing the filters or search term</Text>
+                                        </div>
+                                    </InlineStack>
+                                </Box>
+                            ) : (
+                                <div>
+                                    {filteredBookings.map(booking => (
+                                        <BookingCard key={booking.booking_token} booking={booking} />
+                                    ))}
+                                </div>
+                            )}
+                        </Box>
+                    </Tabs>
                 </Layout.Section>
             </Layout>
         </Page>

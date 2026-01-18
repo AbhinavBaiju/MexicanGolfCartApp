@@ -1,7 +1,7 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "ec7f70d8e7c5f2ec9cb8b6811b23e491"
-name = "mexican-golf-cart"
+name = "Mexico Golf Carts"
 application_url = "https://master.mexican-golf-cart-admin.pages.dev"
 embedded = true
 

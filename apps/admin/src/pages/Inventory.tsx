@@ -175,7 +175,7 @@ export default function Inventory() {
                                                 <Text variant="headingMd" as="h3">{prod.title}</Text>
                                                 <Badge tone="success">{prod.price}</Badge>
                                             </InlineStack>
-                                            <Text variant="bodySm" tone="subdued">{prod.features}</Text>
+                                            <Text variant="bodySm" tone="subdued" as="p">{prod.features}</Text>
                                         </BlockStack>
                                     </Box>
                                 </Box>

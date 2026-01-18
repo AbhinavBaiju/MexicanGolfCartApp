@@ -311,7 +311,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // For now, use the name.
                 elements.addressText.textContent = `Pickup at: ${selectedOption.textContent}`;
             } else {
-                elements.addressText.textContent = 'Select a location to see address';
+                elements.addressText.textContent = 'Pick-up my cart at The Dock Sayulita';
             }
         }
 

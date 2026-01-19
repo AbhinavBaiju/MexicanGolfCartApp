@@ -64,6 +64,13 @@ export async function handleAdminRequest(request: Request, env: Env): Promise<Re
             }
             return handleProductsPatch(request, env, auth.shopId, productId);
         }
+        if (method === 'DELETE') {
+            const productId = parsePositiveInt(segments[1]);
+            if (!productId) {
+                return jsonError('Invalid product id', 400);
+            }
+            return handleProductsDelete(env, auth.shopId, productId);
+        }
     }
 
     if (segments.length === 1 && segments[0] === 'inventory') {
@@ -286,6 +293,13 @@ async function handleProductsPatch(
         )
         .run();
 
+    return Response.json({ ok: true });
+}
+
+async function handleProductsDelete(env: Env, shopId: number, productId: number): Promise<Response> {
+    await env.DB.prepare('DELETE FROM products WHERE shop_id = ? AND product_id = ?')
+        .bind(shopId, productId)
+        .run();
     return Response.json({ ok: true });
 }
 
@@ -574,13 +588,13 @@ async function handleBookingComplete(env: Env, shopId: number, bookingToken: str
 }
 
 async function fulfillShopifyOrder(env: Env, shopId: number, orderId: number): Promise<{ success: boolean; message: string }> {
-     const shopRow = await env.DB.prepare('SELECT shop_domain, access_token FROM shops WHERE id = ?')
+    const shopRow = await env.DB.prepare('SELECT shop_domain, access_token FROM shops WHERE id = ?')
         .bind(shopId).first();
     if (!shopRow) return { success: false, message: 'Shop not found' };
 
     const { shop_domain, access_token } = shopRow as { shop_domain: string; access_token: string };
 
-    const foRes = await fetch(`https://${shop_domain}/admin/api/2024-04/orders/${orderId}/fulfillment_orders.json`, {
+    const foRes = await fetch(`https://${shop_domain}/admin/api/2025-10/orders/${orderId}/fulfillment_orders.json`, {
         headers: { 'X-Shopify-Access-Token': access_token }
     });
 
@@ -606,7 +620,7 @@ async function fulfillShopifyOrder(env: Env, shopId: number, orderId: number): P
         }
     };
 
-    const createRes = await fetch(`https://${shop_domain}/admin/api/2024-04/fulfillments.json`, {
+    const createRes = await fetch(`https://${shop_domain}/admin/api/2025-10/fulfillments.json`, {
         method: 'POST',
         headers: {
             'X-Shopify-Access-Token': access_token,
@@ -631,17 +645,86 @@ async function handleShopifyProductsGet(env: Env, shopId: number): Promise<Respo
 
     const { shop_domain, access_token } = shopRow as { shop_domain: string; access_token: string };
 
-    const response = await fetch(`https://${shop_domain}/admin/api/2024-04/products.json?fields=id,title,images,variants,status`, {
-        headers: { 'X-Shopify-Access-Token': access_token }
-    });
-
-    if (!response.ok) {
-        return jsonError('Failed to fetch products from Shopify', 502);
+    const query = `
+    {
+      products(first: 50, sortKey: TITLE) {
+        edges {
+          node {
+            id
+            title
+            status
+            images(first: 1) {
+              edges {
+                node {
+                  url
+                }
+              }
+            }
+            variants(first: 20) {
+              edges {
+                node {
+                  id
+                  title
+                }
+              }
+            }
+          }
+        }
+      }
     }
+    `;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const data = await response.json() as any;
-    return Response.json({ ok: true, products: data.products });
+    try {
+        const response = await fetch(`https://${shop_domain}/admin/api/2025-10/graphql.json`, {
+            method: 'POST',
+            headers: {
+                'X-Shopify-Access-Token': access_token,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ query }),
+        });
+
+        if (!response.ok) {
+            const text = await response.text();
+            console.error('GraphQL HTTP Error', text);
+            return jsonError('Failed to fetch products from Shopify (HTTP)', 502);
+        }
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const body = await response.json() as any;
+        if (body.errors) {
+            console.error('GraphQL Errors', JSON.stringify(body.errors));
+            return jsonError('Failed to fetch products from Shopify (GraphQL)', 502);
+        }
+
+        const rawProducts = body.data?.products?.edges || [];
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const products = rawProducts.map((edge: any) => {
+            const node = edge.node;
+            const productId = parseInt(node.id.split('/').pop() || '0');
+
+            return {
+                id: productId,
+                title: node.title,
+                status: node.status,
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                images: node.images.edges.map((imgEdge: any) => ({
+                    src: imgEdge.node.url
+                })),
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                variants: node.variants.edges.map((varEdge: any) => ({
+                    id: parseInt(varEdge.node.id.split('/').pop() || '0'),
+                    title: varEdge.node.title
+                }))
+            };
+        });
+
+        return Response.json({ ok: true, products });
+    } catch (e) {
+        console.error('Shopify fetch exception', e);
+        return jsonError('Exception fetching products', 500);
+    }
 }
 
 function rateLimitKey(request: Request, scope: string): string {

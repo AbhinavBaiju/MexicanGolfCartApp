@@ -1,15 +1,10 @@
-import { Page, Layout, LegacyCard, IndexTable, Text, Select, Button, Modal, TextField, FormLayout, InlineError, Badge, Grid, Card, BlockStack, InlineStack, Box, Divider } from '@shopify/polaris';
+import { Page, Layout, LegacyCard, IndexTable, Text, Button, Modal, TextField, FormLayout, InlineError, Badge, Grid, Card, BlockStack, InlineStack, Box, Divider } from '@shopify/polaris';
+import { useAppBridge } from '@shopify/app-bridge-react';
 import { useAuthenticatedFetch } from '../api';
 import { useEffect, useState, useCallback, useMemo } from 'react';
 
 // Shopify Product Type
-interface ShopifyProduct {
-    id: number;
-    title: string;
-    images: { src: string }[];
-    variants: { id: number; title: string }[];
-    status: string;
-}
+
 
 // Result from /admin/products (Config)
 interface ProductConfig {
@@ -40,13 +35,12 @@ interface InventoryDay {
 
 export default function Inventory() {
     const fetch = useAuthenticatedFetch();
-    
+
     // Data States
-    const [shopifyProducts, setShopifyProducts] = useState<ShopifyProduct[]>([]);
     const [productConfigs, setProductConfigs] = useState<ProductConfig[]>([]);
     const [inventory, setInventory] = useState<InventoryDay[]>([]);
     const [loading, setLoading] = useState(false);
-    
+
     // View State
     const [dateRange, setDateRange] = useState({
         month: new Date().getMonth(),
@@ -64,25 +58,39 @@ export default function Inventory() {
     const [tempProdAvailability, setTempProdAvailability] = useState('');
     const [tempShopifyId, setTempShopifyId] = useState('');
 
+    const shopify = useAppBridge();
+
+    const handleOpenProductPicker = useCallback(async () => {
+        const selected = await shopify.resourcePicker({
+            type: 'product',
+            action: 'select',
+            multiple: false,
+        });
+
+        if (selected && selected.length > 0) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const product = selected[0] as any;
+            // Extract numeric ID from GID (format: gid://shopify/Product/123456)
+            const productId = product.id.split('/').pop();
+            setTempShopifyId(productId);
+
+            // Optionally fetch product details to show title
+            // You can also store the title directly from product.title
+        }
+    }, [shopify]);
+
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // 1. Fetch Shopify Products & Configs on Mount
+    // 1. Fetch Configs on Mount
     useEffect(() => {
         const loadInitial = async () => {
-             // Load Configs
-             const configRes = await fetch('/products');
-             if (configRes.ok) {
-                 const data = await configRes.json();
-                 setProductConfigs(data.products || []);
-             }
-
-             // Load Shopify Products
-             const shopifyRes = await fetch('/shopify-products');
-             if (shopifyRes.ok) {
-                 const data = await shopifyRes.json();
-                 setShopifyProducts(data.products || []);
-             }
+            // Load Configs
+            const configRes = await fetch('/products');
+            if (configRes.ok) {
+                const data = await configRes.json();
+                setProductConfigs(data.products || []);
+            }
         };
         loadInitial();
     }, [fetch]);
@@ -109,11 +117,10 @@ export default function Inventory() {
         }
 
         return productConfigs.map(cfg => {
-            const sp = shopifyProducts.find(p => p.id === cfg.product_id);
             return {
                 id: cfg.product_id,
-                title: sp ? sp.title : `Product ${cfg.product_id}`,
-                image: sp?.images?.[0]?.src || '',
+                title: `Product ${cfg.product_id}`,
+                image: '',
                 price: '$-/day', // Helper to fetch variant price if needed
                 features: 'Standard features',
                 totalAvailability: cfg.default_capacity,
@@ -121,7 +128,7 @@ export default function Inventory() {
                 isLinked: true
             };
         });
-    }, [productConfigs, shopifyProducts]);
+    }, [productConfigs]);
 
     // 3. Load Inventory for Month based on productDefinitions
     const loadInventory = useCallback(async () => {
@@ -148,7 +155,7 @@ export default function Inventory() {
             });
 
             const results = await Promise.all(promises);
-            
+
             // Merge into date-keyed object
             // Create list of all dates in month
             const dates: string[] = [];
@@ -200,8 +207,8 @@ export default function Inventory() {
         setEditingDay(day.date);
         const caps: Record<number, string> = {};
         productDefinitions.filter(p => p.isLinked).forEach(p => {
-             const d = day[p.id];
-             caps[p.id] = d ? d.capacity.toString() : p.totalAvailability.toString();
+            const d = day[p.id];
+            caps[p.id] = d ? d.capacity.toString() : p.totalAvailability.toString();
         });
         setEditingCaps(caps);
         setEditModalOpen(true);
@@ -215,12 +222,12 @@ export default function Inventory() {
             // Send PUT for each product? Or backend update to batch?
             // Existing backend: PUT /inventory takes body { product_id, overrides: [{date, capacity}] }
             // Must loop.
-            
+
             const promises = Object.keys(editingCaps).map(pidStr => {
                 const pid = parseInt(pidStr);
                 const val = parseInt(editingCaps[pid]);
                 if (isNaN(val) || val < 0) return Promise.resolve();
-                
+
                 return fetch('/inventory', {
                     method: 'PUT',
                     body: JSON.stringify({
@@ -235,7 +242,7 @@ export default function Inventory() {
             loadInventory();
 
         } catch (e: unknown) {
-             console.error(e);
+            console.error(e);
         } finally {
             setSaving(false);
         }
@@ -252,12 +259,14 @@ export default function Inventory() {
     const handleSaveProductSettings = async () => {
         if (!editingProductDiff) return;
 
+        // The only reason this configuration will be used for is for adding the product to cart, if the product is booked through the booking form. (We will add the logic for this later, but mention it as a comment in the respsecitve area).
+
         // If linking a new ID, we are essentially Creating/Updating a config for that ID.
-        // If we change ID, we might leave the old config orphaned (or we can delete it, but let's just Upsert the new one).
-        
+        // If we change ID, we must delete the old config to "swap" it.
+
         const newId = parseInt(tempShopifyId);
         const capacity = parseInt(tempProdAvailability);
-        
+
         if (isNaN(newId) || newId <= 0) {
             setError("Please select a valid Shopify Product");
             return;
@@ -269,6 +278,13 @@ export default function Inventory() {
 
         setSaving(true);
         try {
+            // Check for swap
+            const oldId = editingProductDiff.isLinked ? parseInt(editingProductDiff.shopifyProductId) : 0;
+            if (oldId && oldId !== newId) {
+                // Delete the old configuration
+                await fetch(`/products/${oldId}`, { method: 'DELETE' });
+            }
+
             const payload = {
                 rentable: true,
                 default_capacity: capacity,
@@ -301,13 +317,8 @@ export default function Inventory() {
     };
 
     const monthName = new Date(dateRange.year, dateRange.month, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
-    
-    // Shopify Options for Select
-    const shopifyOptions = shopifyProducts.map(p => ({
-        label: p.title,
-        value: p.id.toString()
-    }));
-    shopifyOptions.unshift({ label: 'Select a Shopify Product', value: '' });
+
+
 
     return (
         <Page
@@ -354,25 +365,27 @@ export default function Inventory() {
                         For now, the slots logic above handles it if we start empty.
                         But if we have configs, we show them. 
                         We might want a "Plus" Card to add more.*/}
-                     <Grid.Cell columnSpan={{ xs: 6, sm: 6, md: 4, lg: 4, xl: 4 }}>
-                        <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '300px' }}>
-                             <Button onClick={() => {
-                                 setEditingProductDiff({
-                                     id: 0, 
-                                     title: 'New Product', 
-                                     image: '', 
-                                     price: '', 
-                                     features: '',
-                                     totalAvailability: 0,
-                                     shopifyProductId: '',
-                                     isLinked: false
-                                 });
-                                 setTempProdAvailability('10');
-                                 setTempShopifyId('');
-                                 setProductSettingsModalOpen(true);
-                             }}>Add Product Configuration</Button>
-                        </div>
-                     </Grid.Cell>
+                    {productConfigs.length < 3 && (
+                        <Grid.Cell columnSpan={{ xs: 6, sm: 6, md: 4, lg: 4, xl: 4 }}>
+                            <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '300px' }}>
+                                <Button onClick={() => {
+                                    setEditingProductDiff({
+                                        id: 0,
+                                        title: 'New Product',
+                                        image: '',
+                                        price: '',
+                                        features: '',
+                                        totalAvailability: 0,
+                                        shopifyProductId: '',
+                                        isLinked: false
+                                    });
+                                    setTempProdAvailability('10');
+                                    setTempShopifyId('');
+                                    setProductSettingsModalOpen(true);
+                                }}>Add Product Configuration</Button>
+                            </div>
+                        </Grid.Cell>
+                    )}
                 </Grid>
 
                 <Layout>
@@ -466,15 +479,17 @@ export default function Inventory() {
                 <Modal.Section>
                     <FormLayout>
                         {error && <InlineError message={error} fieldID="error" />}
-                        
-                        <Select
-                            label="Shopify Product"
-                            options={shopifyOptions}
-                            value={tempShopifyId}
-                            onChange={setTempShopifyId}
-                            disabled={editingProductDiff?.isLinked} // Cannot change ID once linked (or maybe we allow re-link? simpler to disable for now)
-                            helpText="Select the Shopify product to manage inventory for."
-                        />
+
+                        <BlockStack gap="400">
+                            <Text as="p" variant="bodyMd">
+                                {tempShopifyId ? `Selected Product ID: ${tempShopifyId}` : 'No product selected'}
+                            </Text>
+                            <Button
+                                onClick={handleOpenProductPicker}
+                            >
+                                {tempShopifyId ? 'Change Product' : 'Select Shopify Product'}
+                            </Button>
+                        </BlockStack>
 
                         <TextField
                             label="Default Daily Capacity"

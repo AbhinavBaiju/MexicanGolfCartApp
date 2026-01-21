@@ -442,13 +442,14 @@ async function handleRelease(request: Request, env: Env, shopDomain: string): Pr
 
 async function handleConfig(env: Env, shopDomain: string): Promise<Response> {
     try {
-        const shopStmt = await env.DB.prepare('SELECT id FROM shops WHERE shop_domain = ?')
+        const shopStmt = await env.DB.prepare('SELECT id, shop_domain, access_token FROM shops WHERE shop_domain = ?')
             .bind(shopDomain)
             .first();
         if (!shopStmt) {
             return Response.json({ ok: false, error: 'Shop not found' }, { status: 404 });
         }
         const shopId = shopStmt.id as number;
+        const accessToken = shopStmt.access_token as string;
 
         const locations = await env.DB.prepare(
             'SELECT code, name, lead_time_days, min_duration_days FROM locations WHERE shop_id = ? AND active = 1 ORDER BY name'
@@ -456,16 +457,70 @@ async function handleConfig(env: Env, shopDomain: string): Promise<Response> {
             .bind(shopId)
             .all();
 
-        const products = await env.DB.prepare(
+        const productsRows = await env.DB.prepare(
             'SELECT product_id, variant_id, default_capacity, deposit_variant_id, deposit_multiplier FROM products WHERE shop_id = ? AND rentable = 1 ORDER BY product_id'
         )
             .bind(shopId)
             .all();
 
+        const products = productsRows.results ?? [];
+
+        // Fetch product details from Shopify if we have products
+        if (products.length > 0) {
+            const productIds = products.map((p: any) => `gid://shopify/Product/${p.product_id}`);
+            const query = `
+            query ($ids: [ID!]!) {
+              nodes(ids: $ids) {
+                ... on Product {
+                  id
+                  title
+                }
+              }
+            }
+            `;
+
+            try {
+                const shopifyRes = await fetch(`https://${shopDomain}/admin/api/2025-10/graphql.json`, {
+                    method: 'POST',
+                    headers: {
+                        'X-Shopify-Access-Token': accessToken,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        query,
+                        variables: { ids: productIds }
+                    }),
+                });
+
+                if (shopifyRes.ok) {
+                    const shopifyData = await shopifyRes.json() as any;
+                    const nodes = shopifyData.data?.nodes || [];
+
+                    // Create map of ID -> Title
+                    const titleMap = new Map<number, string>();
+                    nodes.forEach((node: any) => {
+                        if (node && node.id) {
+                            const id = parseInt(node.id.split('/').pop() || '0');
+                            titleMap.set(id, node.title);
+                        }
+                    });
+
+                    // Merge titles into products
+                    products.forEach((p: any) => {
+                        p.title = titleMap.get(p.product_id) || `Product ${p.product_id}`;
+                    });
+                } else {
+                    console.error('Failed to fetch Shopify products', await shopifyRes.text());
+                }
+            } catch (err) {
+                console.error('Error fetching Shopify products', err);
+            }
+        }
+
         return Response.json({
             ok: true,
             locations: locations.results ?? [],
-            products: products.results ?? [],
+            products: products,
         });
     } catch (e) {
         console.error('Config fetch failed', e);

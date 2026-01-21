@@ -59,6 +59,7 @@ export default function Dashboard() {
         bookingsCount: 0,
         cancelledCount: 0
     });
+    const [productStats, setProductStats] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
 
@@ -68,7 +69,7 @@ export default function Dashboard() {
             const response = await fetch('/dashboard');
             if (response.ok) {
                 const data = await response.json();
-                
+
                 // data.upcomingBookings is just top 5. We should store them.
                 // But the UI filters 'bookings' for upcoming.
                 // The current UI logic (filtering 'bookings' array) assumes we have ALL bookings.
@@ -85,10 +86,10 @@ export default function Dashboard() {
                 // But let's check what I implemented in backend `handleDashboardGet`.
                 // It returns `upcomingBookings` (limit 5).
                 // It returns `stats` (aggregates).
-                
+
                 // To display the Calendar properly, I need all bookings for the month.
                 // I will fetch `/bookings` as well.
-                
+
                 const [, bookingsRes] = await Promise.all([
                     Promise.resolve(data), // already json
                     fetch('/bookings')
@@ -100,10 +101,11 @@ export default function Dashboard() {
                 }
 
                 setStats({
-                    revenue: parseInt(data.stats.revenue || '0'), // Backend sends 0
+                    revenue: parseFloat(data.stats.revenue || '0'),
                     bookingsCount: parseInt(data.stats.bookings_count || '0'),
                     cancelledCount: parseInt(data.stats.cancelled_count || '0'),
                 });
+                setProductStats(data.productStats || []);
             }
         } catch (error) {
             console.error('Error fetching dashboard data:', error);
@@ -127,16 +129,36 @@ export default function Dashboard() {
 
     const upcomingBookings = bookings.filter(b => {
         if (b.status !== 'CONFIRMED') return false;
-        const bookingDate = new Date(b.start_date); 
+        const bookingDate = new Date(b.start_date);
         return bookingDate >= new Date();
     });
 
-    const filteredUpcoming = upcomingBookings.filter(b => {
-        if (!searchQuery) return true;
-        const q = searchQuery.toLowerCase();
-        return b.booking_token?.toLowerCase().includes(q) ||
-            b.location_code?.toLowerCase().includes(q);
-    });
+    // Server-side search
+    const [searchResults, setSearchResults] = useState<Booking[] | null>(null);
+
+    useEffect(() => {
+        const timer = setTimeout(async () => {
+            if (!searchQuery) {
+                setSearchResults(null);
+                return;
+            }
+            try {
+                const res = await fetch(`/bookings?search=${encodeURIComponent(searchQuery)}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    setSearchResults(data.bookings || []);
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }, 500); // Debounce
+        return () => clearTimeout(timer);
+    }, [searchQuery, fetch]);
+
+    // Use search results if query exists, otherwise show default upcoming filter from local list
+    const displayedBookings = searchQuery
+        ? searchResults || []
+        : upcomingBookings;
 
     return (
         <Page fullWidth>
@@ -173,7 +195,7 @@ export default function Dashboard() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                     <DashboardStats stats={stats} />
                     <div className="full-height-card-wrapper" style={{ flex: 1 }}>
-                        <ProductInventory />
+                        <ProductInventory stats={productStats} />
                     </div>
                 </div>
 
@@ -225,11 +247,11 @@ export default function Dashboard() {
                                     </div>
 
                                     {/* Content */}
-                                    {loading ? (
+                                    {loading && !searchResults ? (
                                         <Box padding="1600">
                                             <InlineStack align="center"><Spinner size="large" /></InlineStack>
                                         </Box>
-                                    ) : filteredUpcoming.length === 0 ? (
+                                    ) : displayedBookings.length === 0 ? (
                                         <div style={{ padding: '60px 0', textAlign: 'center' }}>
                                             <SearchIcon style={{ width: 60, height: 60, color: '#8c9196', margin: '0 auto', display: 'block' }} />
                                             <div style={{ height: 16 }} />
@@ -238,14 +260,14 @@ export default function Dashboard() {
                                         </div>
                                     ) : (
                                         <div>
-                                            {filteredUpcoming.slice(0, 5).map(booking => (
-                                                <BookingCard 
-                                                    key={booking.booking_token} 
-                                                    booking={booking} 
+                                            {displayedBookings.slice(0, 5).map(booking => (
+                                                <BookingCard
+                                                    key={booking.booking_token}
+                                                    booking={booking}
                                                     onMarkComplete={handleMarkComplete}
                                                 />
                                             ))}
-                                            {filteredUpcoming.length > 5 && (
+                                            {displayedBookings.length > 5 && (
                                                 <Box padding="400">
                                                     <InlineStack align="center">
                                                         <Button variant="plain">View all upcoming bookings</Button>

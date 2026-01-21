@@ -1149,3 +1149,60 @@
     font-size: 12px !important;
   }
 }
+
+/* ============================================
+   PRODUCT TOGGLE
+   ============================================ */
+
+.gc-product-toggle-container {
+  margin-bottom: 20px;
+}
+
+.gc-product-toggle {
+  display: flex;
+  background-color: var(--gc-color-input-bg);
+  border: 1px solid var(--gc-color-border);
+  border-radius: 111px;
+  padding: 4px;
+  height: 56px;
+  width: 100%;
+  box-sizing: border-box;
+  gap: 4px;
+}
+
+.gc-toggle-option {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: #666;
+  border-radius: 111px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 8px;
+}
+
+.gc-toggle-option:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+  color: var(--gc-color-text-input);
+}
+
+.gc-toggle-option.active {
+  background-color: var(--gc-color-primary);
+  color: #FFFFFF;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+@media (max-width: 560px) {
+  .gc-product-toggle {
+    height: 52px;
+  }
+
+  .gc-toggle-option {
+    font-size: 13px;
+  }
+}

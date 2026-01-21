@@ -429,13 +429,14 @@ async function handleBookingsGet(request: Request, env: Env, shopId: number): Pr
     const status = url.searchParams.get('status');
     const startDate = url.searchParams.get('start_date');
     const endDate = url.searchParams.get('end_date');
+    const search = url.searchParams.get('search');
 
     if ((startDate && !parseDateParts(startDate)) || (endDate && !parseDateParts(endDate))) {
         return jsonError('Invalid date range', 400);
     }
 
     let sql =
-        'SELECT booking_token, status, location_code, start_date, end_date, order_id, invalid_reason, created_at, updated_at FROM bookings WHERE shop_id = ?';
+        'SELECT booking_token, status, location_code, start_date, end_date, order_id, invalid_reason, created_at, updated_at, customer_name, customer_email, revenue FROM bookings WHERE shop_id = ?';
     const bindings: (string | number)[] = [shopId];
     if (status) {
         sql += ' AND status = ?';
@@ -448,6 +449,11 @@ async function handleBookingsGet(request: Request, env: Env, shopId: number): Pr
     if (endDate) {
         sql += ' AND end_date <= ?';
         bindings.push(endDate);
+    }
+    if (search) {
+        const term = `%${search}%`;
+        sql += ' AND (booking_token LIKE ? OR order_id LIKE ? OR customer_name LIKE ? OR customer_email LIKE ?)';
+        bindings.push(term, term, term, term);
     }
     sql += ' ORDER BY start_date DESC';
 
@@ -514,7 +520,7 @@ async function handleDashboardGet(env: Env, shopId: number): Promise<Response> {
 
     // upcoming: start_date > today, CONFIRMED
     const upcomingStmt = env.DB.prepare(
-        `SELECT booking_token, start_date, end_date, location_code, status, order_id FROM bookings 
+        `SELECT booking_token, start_date, end_date, location_code, status, order_id, customer_name FROM bookings 
          WHERE shop_id = ? AND start_date > ? AND status = 'CONFIRMED' 
          ORDER BY start_date ASC LIMIT 5`
     ).bind(shopId, today);
@@ -534,7 +540,11 @@ async function handleDashboardGet(env: Env, shopId: number): Promise<Response> {
         `SELECT COUNT(*) as count FROM bookings WHERE shop_id = ? AND status IN ('CANCELLED', 'EXPIRED', 'INVALID')`
     ).bind(shopId);
 
-    const [active, pending, pickups, dropoffs, upcoming, history, bCount, cCount] = await env.DB.batch([
+    const revenueStmt = env.DB.prepare(
+        `SELECT SUM(revenue) as total FROM bookings WHERE shop_id = ? AND status = 'CONFIRMED'`
+    ).bind(shopId);
+
+    const results = await env.DB.batch([
         activeBookingsStmt,
         pendingHoldsStmt,
         pickupsStmt,
@@ -542,25 +552,38 @@ async function handleDashboardGet(env: Env, shopId: number): Promise<Response> {
         upcomingStmt,
         historyStmt,
         bookingsCountStmt,
-        cancelledCountStmt
+        cancelledCountStmt,
+        revenueStmt,
+        // Product breakdown (count only for now)
+        env.DB.prepare(
+            `SELECT product_id, COUNT(*) as count 
+             FROM booking_items 
+             JOIN bookings ON bookings.id = booking_items.booking_id 
+             WHERE bookings.status = 'CONFIRMED' 
+             GROUP BY product_id`
+        )
     ]);
+
+    // Check bounds since we added a query
+    const productStats = results.length > 9 ? results[9].results : [];
 
     return Response.json({
         ok: true,
         todayDate: today,
         stats: {
-            active_bookings: (active.results?.[0] as any)?.count ?? 0,
-            pending_holds: (pending.results?.[0] as any)?.count ?? 0,
-            bookings_count: (bCount.results?.[0] as any)?.count ?? 0,
-            cancelled_count: (cCount.results?.[0] as any)?.count ?? 0,
-            revenue: 0
+            active_bookings: (results[0].results?.[0] as any)?.count ?? 0,
+            pending_holds: (results[1].results?.[0] as any)?.count ?? 0,
+            bookings_count: (results[6].results?.[0] as any)?.count ?? 0,
+            cancelled_count: (results[7].results?.[0] as any)?.count ?? 0,
+            revenue: (results[8].results?.[0] as any)?.total ?? 0
         },
+        productStats: productStats ?? [],
         todayActivity: {
-            pickups: pickups.results ?? [],
-            dropoffs: dropoffs.results ?? [],
+            pickups: results[2].results ?? [],
+            dropoffs: results[3].results ?? [],
         },
-        upcomingBookings: upcoming.results ?? [],
-        recentHistory: history.results ?? []
+        upcomingBookings: results[4].results ?? [],
+        recentHistory: results[5].results ?? []
     });
 }
 

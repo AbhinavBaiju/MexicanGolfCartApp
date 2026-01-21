@@ -48,11 +48,15 @@ interface OrderLineItem {
     product_id: number | null;
     variant_id: number | null;
     quantity: number;
+    price: string | null;
     properties?: OrderLineItemProperty[] | Record<string, unknown> | null;
 }
 
 interface OrderWebhookPayload {
     id: number;
+    email: string | null;
+    customer: { first_name?: string; last_name?: string; email?: string } | null;
+    current_subtotal_price: string | null;
     line_items: OrderLineItem[];
 }
 
@@ -152,9 +156,24 @@ export async function confirmBookingsFromOrder(
         let cancellationTriggered = false;
         let cancellationResult: OrderCancellationResult | null = null;
 
+        const customerName = [order.customer?.first_name, order.customer?.last_name].filter(Boolean).join(' ') || 'Guest';
+        const customerEmail = order.customer?.email || order.email || '';
+        // Heuristic: distribute revenue evenly or just store 0 for now? 
+        // Better: sum up the price of line items for this specific booking token.
+        // But price is in line_items[].price (which we aren't parsing yet).
+        // Let's rely on simple extraction or just a placeholder for now if parsing price is too complex without adding more fields.
+        // Wait, I should parse price.
+
+        // Actually, let's keep it simple for this step: 
+        // We will pass the data to processBookingToken. 
+        // We need to calculate revenue *per booking*. 
+        // This requires parsing line item price.
+
         for (const token of extraction.tokens) {
             const lineItems = extraction.lineItemsByToken.get(token) ?? [];
-            const result = await processBookingToken(db, shopId, order.id, token, lineItems);
+            const revenue = calculateBookingRevenue(lineItems);
+
+            const result = await processBookingToken(db, shopId, order.id, token, lineItems, customerName, customerEmail, revenue);
             if (result.status === 'confirmed') {
                 confirmedCount += 1;
             } else {
@@ -237,7 +256,10 @@ async function processBookingToken(
     shopId: number,
     orderId: number,
     bookingToken: string,
-    lineItems: OrderLineItem[]
+    lineItems: OrderLineItem[],
+    customerName: string,
+    customerEmail: string,
+    revenue: number
 ): Promise<ProcessTokenResult> {
     const bookingRow = await db
         .prepare('SELECT id, shop_id, status, order_id, start_date, end_date, location_code FROM bookings WHERE booking_token = ?')
@@ -348,7 +370,7 @@ async function processBookingToken(
         return { status: 'invalid', reason: 'Capacity allocations missing', bookingId: booking.id };
     }
 
-    const confirmed = await markBookingConfirmed(db, booking.id, orderId);
+    const confirmed = await markBookingConfirmed(db, booking.id, orderId, customerName, customerEmail, revenue);
     if (!confirmed) {
         const refreshed = await db.prepare('SELECT status, order_id FROM bookings WHERE id = ?').bind(booking.id).first();
         const refreshedStatus = parseBookingStatusRow(refreshed);
@@ -362,14 +384,21 @@ async function processBookingToken(
     return { status: 'confirmed', reason: 'Confirmed', bookingId: booking.id };
 }
 
-async function markBookingConfirmed(db: D1Database, bookingId: string, orderId: number): Promise<boolean> {
+async function markBookingConfirmed(
+    db: D1Database,
+    bookingId: string,
+    orderId: number,
+    customerName: string,
+    customerEmail: string,
+    revenue: number
+): Promise<boolean> {
     const result = await db
         .prepare(
             `UPDATE bookings
-             SET status = 'CONFIRMED', order_id = ?, updated_at = datetime('now')
+             SET status = 'CONFIRMED', order_id = ?, customer_name = ?, customer_email = ?, revenue = ?, updated_at = datetime('now')
              WHERE id = ? AND status = 'HOLD'`
         )
-        .bind(orderId, bookingId)
+        .bind(orderId, customerName, customerEmail, revenue, bookingId)
         .run();
     return (result.meta?.changes ?? 0) > 0;
 }
@@ -675,7 +704,15 @@ function parseOrderPayload(rawBody: string): OrderWebhookPayload | null {
         }
     }
 
-    return { id: orderId, line_items: lineItems };
+    const email = readString(data.email);
+    const customer = isRecord(data.customer) ? {
+        first_name: readString(data.customer.first_name) || undefined,
+        last_name: readString(data.customer.last_name) || undefined,
+        email: readString(data.customer.email) || undefined
+    } : null;
+    const current_subtotal_price = readStringOrNumber(data.current_subtotal_price);
+
+    return { id: orderId, line_items: lineItems, email, customer, current_subtotal_price };
 }
 
 function parseLineItem(value: unknown): OrderLineItem | null {
@@ -686,6 +723,7 @@ function parseLineItem(value: unknown): OrderLineItem | null {
     const productId = toPositiveInt(value.product_id);
     const variantId = toPositiveInt(value.variant_id);
     const quantity = toPositiveInt(value.quantity) ?? 0;
+    const price = readStringOrNumber(value.price);
 
     let properties: OrderLineItem['properties'] = null;
     if (Array.isArray(value.properties)) {
@@ -698,6 +736,7 @@ function parseLineItem(value: unknown): OrderLineItem | null {
         product_id: productId,
         variant_id: variantId,
         quantity,
+        price,
         properties,
     };
 }
@@ -1046,4 +1085,14 @@ function toNonNegativeInt(value: unknown): number | null {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null;
+}
+function calculateBookingRevenue(lineItems: OrderLineItem[]): number {
+    let total = 0;
+    for (const item of lineItems) {
+        const price = parseFloat(item.price || '0');
+        if (!isNaN(price)) {
+            total += price * item.quantity;
+        }
+    }
+    return total;
 }

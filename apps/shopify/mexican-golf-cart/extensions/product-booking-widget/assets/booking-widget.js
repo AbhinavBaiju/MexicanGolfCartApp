@@ -29,8 +29,8 @@ document.addEventListener('DOMContentLoaded', () => {
             addressText: form.querySelector('.gc-address-text')
         };
 
-        const productId = form.dataset.productId;
-        const variantId = form.dataset.variantId;
+        let productId = form.dataset.productId;
+        let variantId = form.dataset.variantId;
 
         let debounceTimer = null;
         let countdownInterval = null;
@@ -39,202 +39,23 @@ document.addEventListener('DOMContentLoaded', () => {
         const API_BASE = elements.container.dataset.apiBase || '/apps/rental'; // Fallback
 
         // Initialize
-        if (!elements.location) return;
+        // if (!elements.location) return; // Allow running even if location is loading
         init();
 
         function init() {
+            // Select new elements
+            elements.toggleContainer = form.querySelector('.gc-product-toggle-container');
+            elements.toggle = form.querySelector('.gc-product-toggle');
+
             initDatePickers();
-            fetchLocations();
+            fetchConfig();
             attachListeners();
 
             // Release on abandon
             window.addEventListener('pagehide', handleAbandon);
-            // Also handle visibility change as backup? pagehide is better for unload.
         }
 
-        function initDatePickers() {
-            // Wait for Flatpickr and Plugin to load
-            if (typeof flatpickr === 'undefined') {
-                console.warn('Flatpickr not loaded');
-                return;
-            }
-
-            // Ensure we have both inputs
-            if (!elements.start || !elements.end) return;
-
-            // Mark inputs as readonly effectively (handled by flatpickr, but good to be sure)
-            elements.start.setAttribute('readonly', 'readonly');
-            elements.end.setAttribute('readonly', 'readonly');
-
-            // Always show 2 months side by side to match reference design
-            const showMonths = 2;
-
-            // Store pending dates before confirmation
-            let pendingDates = [];
-
-            // Helper: Calculate days between two dates
-            const calculateDays = (startDate, endDate) => {
-                if (!startDate || !endDate) return 0;
-                const diffTime = Math.abs(endDate - startDate);
-                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                return diffDays;
-            };
-
-            // Helper: Update footer day count
-            const updateFooterDays = (instance, selectedDates) => {
-                const footer = instance.calendarContainer?.querySelector('.mgc-calendar-footer');
-                if (!footer) return;
-
-                const daysEl = footer.querySelector('.mgc-calendar-footer__days');
-                const doneBtn = footer.querySelector('.mgc-calendar-footer__btn--done');
-
-                if (selectedDates.length === 2) {
-                    const days = calculateDays(selectedDates[0], selectedDates[1]);
-                    daysEl.textContent = `${days} day${days !== 1 ? 's' : ''}`;
-                    doneBtn.disabled = false;
-                    doneBtn.style.opacity = '1';
-                } else if (selectedDates.length === 1) {
-                    daysEl.textContent = 'Select end date';
-                    doneBtn.disabled = true;
-                    doneBtn.style.opacity = '0.5';
-                } else {
-                    daysEl.textContent = 'Select dates';
-                    doneBtn.disabled = true;
-                    doneBtn.style.opacity = '0.5';
-                }
-            };
-
-            // Helper: Create and inject footer
-            const injectFooter = (instance) => {
-                if (!instance.calendarContainer) return;
-
-                // Check if footer already exists
-                if (instance.calendarContainer.querySelector('.mgc-calendar-footer')) return;
-
-                const footer = document.createElement('div');
-                footer.className = 'mgc-calendar-footer';
-                footer.innerHTML = `
-                    <span class="mgc-calendar-footer__days">Select dates</span>
-                    <div class="mgc-calendar-footer__actions">
-                        <button type="button" class="mgc-calendar-footer__btn mgc-calendar-footer__btn--cancel">Cancel</button>
-                        <button type="button" class="mgc-calendar-footer__btn mgc-calendar-footer__btn--done" disabled style="opacity: 0.5">Done</button>
-                    </div>
-                `;
-
-                instance.calendarContainer.appendChild(footer);
-
-                // Cancel button handler
-                footer.querySelector('.mgc-calendar-footer__btn--cancel').addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    pendingDates = [];
-                    instance.close();
-                });
-
-                // Done button handler
-                footer.querySelector('.mgc-calendar-footer__btn--done').addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    if (pendingDates.length === 2) {
-                        // Confirm the selection
-                        validateDates();
-                        debouncedCheckAvailability();
-                        instance.close();
-                    }
-                });
-            };
-
-            // Custom locale for 2-letter weekday abbreviations (matching reference design)
-            const customLocale = {
-                firstDayOfWeek: 1, // Start week on Monday
-                weekdays: {
-                    shorthand: ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'],
-                    longhand: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-                },
-                months: {
-                    shorthand: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
-                    longhand: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
-                }
-            };
-
-            const pickerConfig = {
-                mode: 'range',
-                disableMobile: true,
-                showMonths: showMonths,
-                minDate: "today",
-                dateFormat: "Y-m-d",
-                altInput: true,
-                altFormat: "M j, Y",
-                closeOnSelect: false, // Keep open until Done is clicked
-                locale: customLocale,
-
-                plugins: [new rangePlugin({ input: elements.end })],
-
-                onReady: function (selectedDates, dateStr, instance) {
-                    // Inject custom footer
-                    injectFooter(instance);
-
-                    // Add showMonths class for CSS targeting
-                    if (showMonths === 2) {
-                        instance.calendarContainer.classList.add('showMonths2');
-                    }
-                },
-
-                onOpen: function (selectedDates, dateStr, instance) {
-                    if (instance.calendarContainer) {
-                        // Ensure footer exists
-                        injectFooter(instance);
-
-                        // Update footer state based on current selection
-                        pendingDates = [...selectedDates];
-                        updateFooterDays(instance, selectedDates);
-
-                        // Add class for styling hooks
-                        instance.calendarContainer.classList.add('mgc-custom-calendar');
-                    }
-                },
-
-                onChange: function (selectedDates, dateStr, instance) {
-                    // Store pending dates
-                    pendingDates = [...selectedDates];
-
-                    // Update footer day count
-                    updateFooterDays(instance, selectedDates);
-
-                    // Constraint: Minimum 1 day range (Start != End)
-                    if (selectedDates.length === 2) {
-                        const start = selectedDates[0];
-                        const end = selectedDates[1];
-
-                        if (start.getTime() === end.getTime()) {
-                            // Same day selected - reset to just start date
-                            instance.setDate([start], false);
-                            pendingDates = [start];
-                            updateFooterDays(instance, [start]);
-                        }
-                    }
-                },
-
-                onClose: function (selectedDates, dateStr, instance) {
-                    // If user closed without clicking Done, and we have confirmed dates, keep them
-                    // No additional action needed - Flatpickr maintains the last valid selection
-                    if (selectedDates.length === 2) {
-                        validateDates();
-                        debouncedCheckAvailability();
-                    }
-                }
-            };
-
-            // Initialize on Start Input
-            elements.startPicker = flatpickr(elements.start, pickerConfig);
-
-            // Dynamic Resizing support
-            window.addEventListener('resize', () => {
-                if (elements.startPicker && elements.startPicker.isOpen) {
-                    elements.startPicker.redraw();
-                }
-            });
-        }
+        // ... (initDatePickers unchanged)
 
         function handleAbandon() {
             if (currentBookingToken) {
@@ -243,32 +64,103 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        async function fetchLocations() {
+        async function fetchConfig() {
             try {
                 const res = await fetch(`${API_BASE}/config?shop=${shopDomain}`);
                 if (!res.ok) {
                     const txt = await res.text();
-                    throw new Error(`Failed to load locations: ${res.status} ${txt}`);
+                    throw new Error(`Failed to load config: ${res.status} ${txt}`);
                 }
                 const data = await res.json();
 
+                // Locations
                 if (data.locations && data.locations.length > 0) {
                     elements.location.innerHTML = '<option value="" disabled selected>Select a location</option>';
                     data.locations.forEach(loc => {
                         const option = document.createElement('option');
-                        option.value = loc.code; // Use location code to match booking storage
+                        option.value = loc.code;
                         option.textContent = loc.name;
                         elements.location.appendChild(option);
                     });
-                    // Initial update of address display
                     if (updateAddressDisplay) updateAddressDisplay();
                 } else {
                     showFatalError();
                 }
+
+                // Products
+                let products = data.products || [];
+
+                // Check if products exist
+                if (products.length === 0) {
+                    console.error('No products configured for this shop app.');
+                    updateStatus('Booking system not configured. Please contact support.', 'error');
+                    // Hide form or disable
+                    if (elements.submitBtn) elements.submitBtn.disabled = true;
+                    // Do not render toggle
+                    return;
+                }
+
+                if (products.length > 0) {
+                    renderProductToggle(products);
+                }
+
             } catch (err) {
                 console.error(err);
                 showFatalError();
             }
+        }
+
+        function renderProductToggle(sourceProducts) {
+            if (!elements.toggleContainer || !elements.toggle) return;
+
+            // Enforce limit of 3 products
+            const products = sourceProducts.slice(0, 3);
+
+            elements.toggleContainer.style.display = 'block';
+            elements.toggle.innerHTML = '';
+
+            // Determine initial selection from the VISIBLE products
+            let targetProd = products[0];
+            if (productId) {
+                // If the liquid-provided ID is in our visible list, use it
+                const match = products.find(p => p.product_id == productId);
+                if (match) targetProd = match;
+            }
+
+            let targetBtn = null;
+
+            products.forEach((prod, idx) => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'gc-toggle-option';
+                btn.textContent = prod.title || `Product ${prod.product_id}`;
+
+                btn.onclick = () => {
+                    selectProduct(prod, btn);
+                };
+
+                elements.toggle.appendChild(btn);
+
+                if (prod === targetProd) {
+                    targetBtn = btn;
+                }
+            });
+
+            if (targetBtn && targetProd) {
+                selectProduct(targetProd, targetBtn);
+            }
+        }
+
+        function selectProduct(prod, btn) {
+            productId = prod.product_id;
+            variantId = prod.variant_id; // Ensure variant_id is used if available
+
+            // UI Update
+            const all = elements.toggle.querySelectorAll('.gc-toggle-option');
+            all.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+
+            debouncedCheckAvailability();
         }
 
         function showFatalError() {

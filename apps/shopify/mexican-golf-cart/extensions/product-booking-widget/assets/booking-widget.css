@@ -290,6 +290,18 @@
   }
 }
 
+/* Delivery Details Section */
+.gc-delivery-details {
+  width: 100%;
+}
+
+.gc-delivery-details .gc-input-wrapper {
+  width: 100%;
+}
+
+.gc-delivery-details .gc-input {
+  width: 100%;
+}
 
 
 /* Date Range specific */

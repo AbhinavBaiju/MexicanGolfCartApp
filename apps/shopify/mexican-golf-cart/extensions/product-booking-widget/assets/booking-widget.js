@@ -55,7 +55,38 @@ document.addEventListener('DOMContentLoaded', () => {
             window.addEventListener('pagehide', handleAbandon);
         }
 
-        // ... (initDatePickers unchanged)
+        // Initialize Flatpickr date pickers with range selection
+        function initDatePickers() {
+            if (typeof flatpickr === 'undefined') {
+                console.error('Flatpickr library not loaded');
+                return;
+            }
+
+            // Initialize range picker on start date input
+            flatpickr(elements.start, {
+                mode: "range",
+                altInput: true,
+                altFormat: "M j, Y",
+                dateFormat: "Y-m-d",
+                minDate: "today",
+                plugins: [new rangePlugin({ input: elements.end })],
+                onChange: function (selectedDates, dateStr, instance) {
+                    if (selectedDates.length === 2) {
+                        elements.start.value = instance.formatDate(selectedDates[0], "Y-m-d");
+                        elements.end.value = instance.formatDate(selectedDates[1], "Y-m-d");
+                        // Trigger change events to update availability
+                        elements.start.dispatchEvent(new Event('change'));
+                        elements.end.dispatchEvent(new Event('change'));
+                    }
+                },
+                onReady: function () {
+                    // Mark end input as readonly since it's controlled by range plugin
+                    if (elements.end) {
+                        elements.end.readOnly = true;
+                    }
+                }
+            });
+        }
 
         function handleAbandon() {
             if (currentBookingToken) {

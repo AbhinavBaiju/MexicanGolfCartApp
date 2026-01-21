@@ -57,6 +57,7 @@ export default function Inventory() {
     // Temp states for modal
     const [tempProdAvailability, setTempProdAvailability] = useState('');
     const [tempShopifyId, setTempShopifyId] = useState('');
+    const [tempVariantId, setTempVariantId] = useState('');
 
     const shopify = useAppBridge();
 
@@ -72,7 +73,12 @@ export default function Inventory() {
             const product = selected[0] as any;
             // Extract numeric ID from GID (format: gid://shopify/Product/123456)
             const productId = product.id.split('/').pop();
+
+            // Extract numeric Variant ID from the first variant
+            const variantId = product.variants[0].id.split('/').pop();
+
             setTempShopifyId(productId);
+            setTempVariantId(variantId);
 
             // Optionally fetch product details to show title
             // You can also store the title directly from product.title
@@ -252,6 +258,7 @@ export default function Inventory() {
         setEditingProductDiff(prod);
         setTempProdAvailability(prod.totalAvailability.toString());
         setTempShopifyId(prod.isLinked ? prod.shopifyProductId : '');
+        setTempVariantId(''); // Reset, backend will keep existing if null/undefined is sent, but we want to update if picking new.
         setProductSettingsModalOpen(true);
         setError(null);
     };
@@ -288,6 +295,7 @@ export default function Inventory() {
             const payload = {
                 rentable: true,
                 default_capacity: capacity,
+                variant_id: tempVariantId ? parseInt(tempVariantId) : undefined,
                 // defaults
                 deposit_multiplier: 1
             };
@@ -381,6 +389,7 @@ export default function Inventory() {
                                     });
                                     setTempProdAvailability('10');
                                     setTempShopifyId('');
+                                    setTempVariantId('');
                                     setProductSettingsModalOpen(true);
                                 }}>Add Product Configuration</Button>
                             </div>

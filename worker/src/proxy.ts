@@ -18,6 +18,11 @@ interface AvailabilityResponse {
     error?: string;
 }
 
+interface LocationRules {
+    leadTimeDays: number;
+    minDurationDays: number;
+}
+
 interface HoldRequestItemInput {
     product_id: number;
     variant_id?: number;
@@ -124,7 +129,7 @@ async function handleAvailability(request: Request, env: Env, shopDomain: string
     const productIdStr = url.searchParams.get('product_id');
 
     // Validation
-    if (!startDateStr || !endDateStr || !locationCode || !quantityStr || !productIdStr) {
+    if (!startDateStr || !endDateStr || !quantityStr || !productIdStr) {
         return Response.json({ ok: false, error: 'Missing required parameters' }, { status: 400 });
     }
 
@@ -160,30 +165,32 @@ async function handleAvailability(request: Request, env: Env, shopDomain: string
         }
         const shopId = shopStmt.id as number;
 
-        const locStmt = await env.DB.prepare(
-            'SELECT id, lead_time_days, min_duration_days FROM locations WHERE shop_id = ? AND code = ? AND active = 1'
-        )
-            .bind(shopId, locationCode)
-            .first();
-        if (!locStmt) {
-            return Response.json({ ok: false, error: 'Invalid location' }, { status: 400 });
-        }
+        if (locationCode) {
+            const locStmt = await env.DB.prepare(
+                'SELECT id, lead_time_days, min_duration_days FROM locations WHERE shop_id = ? AND code = ? AND active = 1'
+            )
+                .bind(shopId, locationCode)
+                .first();
+            if (!locStmt) {
+                return Response.json({ ok: false, error: 'Invalid location' }, { status: 400 });
+            }
 
-        const todayStr = getTodayInTimeZone(STORE_TIMEZONE);
-        const todayParts = parseDateParts(todayStr);
-        if (!todayParts) {
-            return Response.json({ ok: false, error: 'Failed to read store date' }, { status: 500 });
-        }
-        const todayIndex = datePartsToIndex(todayParts);
-        const leadTimeDays = locStmt.lead_time_days as number;
-        const minDurationDays = locStmt.min_duration_days as number;
-        const durationDays = endIndex - startIndex + 1;
+            const todayStr = getTodayInTimeZone(STORE_TIMEZONE);
+            const todayParts = parseDateParts(todayStr);
+            if (!todayParts) {
+                return Response.json({ ok: false, error: 'Failed to read store date' }, { status: 500 });
+            }
+            const todayIndex = datePartsToIndex(todayParts);
+            const leadTimeDays = locStmt.lead_time_days as number;
+            const minDurationDays = locStmt.min_duration_days as number;
+            const durationDays = endIndex - startIndex + 1;
 
-        if (startIndex < todayIndex + leadTimeDays) {
-            return Response.json({ ok: false, error: 'Start date violates lead time' }, { status: 400 });
-        }
-        if (durationDays < minDurationDays) {
-            return Response.json({ ok: false, error: 'Below minimum duration' }, { status: 400 });
+            if (startIndex < todayIndex + leadTimeDays) {
+                return Response.json({ ok: false, error: 'Start date violates lead time' }, { status: 400 });
+            }
+            if (durationDays < minDurationDays) {
+                return Response.json({ ok: false, error: 'Below minimum duration' }, { status: 400 });
+            }
         }
 
         const productStmt = await env.DB.prepare(

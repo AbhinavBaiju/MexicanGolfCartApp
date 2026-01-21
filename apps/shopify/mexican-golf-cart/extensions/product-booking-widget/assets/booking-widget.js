@@ -313,7 +313,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            if (!elements.start.value || !elements.end.value || !elements.location.value || !elements.quantity.value) {
+            if (!elements.start.value || !elements.end.value || !elements.quantity.value) {
                 updateStatus('');
                 return;
             }
@@ -485,10 +485,19 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         function updateStatus(msg, type = 'info') {
-            elements.statusMsg.innerHTML = ''; // Clear content including links
-            elements.statusMsg.textContent = msg;
-            elements.statusMsg.className = 'gc-status-message';
+            // Log all status updates to console as debug messages
             if (msg) {
+                console.debug(`[Booking Widget] ${msg} (${type})`);
+            }
+
+            // Clear previous UI content
+            elements.statusMsg.innerHTML = '';
+            elements.statusMsg.className = 'gc-status-message';
+
+            // Only display errors in the UI. 
+            // Success ('Available') and loading ('Checking...') states are now console-only.
+            if (type === 'error' && msg) {
+                elements.statusMsg.textContent = msg;
                 elements.statusMsg.classList.add(`gc-status-${type}`);
             }
         }

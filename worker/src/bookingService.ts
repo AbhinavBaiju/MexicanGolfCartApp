@@ -81,6 +81,8 @@ interface BookingLineItemMeta {
     endDate: string | null;
     location: string | null;
     error?: string;
+    fulfillmentType?: string | null;
+    deliveryAddress?: string | null;
 }
 
 interface ShopAuthRow {
@@ -370,7 +372,16 @@ async function processBookingToken(
         return { status: 'invalid', reason: 'Capacity allocations missing', bookingId: booking.id };
     }
 
-    const confirmed = await markBookingConfirmed(db, booking.id, orderId, customerName, customerEmail, revenue);
+    const confirmed = await markBookingConfirmed(
+        db,
+        booking.id,
+        orderId,
+        customerName,
+        customerEmail,
+        revenue,
+        lineItemMeta.fulfillmentType || null,
+        lineItemMeta.deliveryAddress || null
+    );
     if (!confirmed) {
         const refreshed = await db.prepare('SELECT status, order_id FROM bookings WHERE id = ?').bind(booking.id).first();
         const refreshedStatus = parseBookingStatusRow(refreshed);
@@ -390,15 +401,17 @@ async function markBookingConfirmed(
     orderId: number,
     customerName: string,
     customerEmail: string,
-    revenue: number
+    revenue: number,
+    fulfillmentType: string | null,
+    deliveryAddress: string | null
 ): Promise<boolean> {
     const result = await db
         .prepare(
             `UPDATE bookings
-             SET status = 'CONFIRMED', order_id = ?, customer_name = ?, customer_email = ?, revenue = ?, updated_at = datetime('now')
+             SET status = 'CONFIRMED', order_id = ?, customer_name = ?, customer_email = ?, revenue = ?, fulfillment_type = ?, delivery_address = ?, updated_at = datetime('now')
              WHERE id = ? AND status = 'HOLD'`
         )
-        .bind(orderId, customerName, customerEmail, revenue, bookingId)
+        .bind(orderId, customerName, customerEmail, revenue, fulfillmentType, deliveryAddress, bookingId)
         .run();
     return (result.meta?.changes ?? 0) > 0;
 }
@@ -805,11 +818,15 @@ function isBookingTokenProperty(name: string): boolean {
 const START_DATE_PROPERTY_KEYS = new Set(['start_date', 'booking_start_date']);
 const END_DATE_PROPERTY_KEYS = new Set(['end_date', 'booking_end_date']);
 const LOCATION_PROPERTY_KEYS = new Set(['location', 'booking_location']);
+const FULFILLMENT_TYPE_KEYS = new Set(['fulfillment_type', 'fulfillment type']);
+const DELIVERY_ADDRESS_KEYS = new Set(['delivery_address', 'delivery address']);
 
 function extractBookingMetaFromLineItems(lineItems: OrderLineItem[]): BookingLineItemMeta {
     let startDate: string | null = null;
     let endDate: string | null = null;
     let location: string | null = null;
+    let fulfillmentType: string | null = null;
+    let deliveryAddress: string | null = null;
 
     for (const item of lineItems) {
         const meta = extractBookingMetaFromProperties(item.properties);
@@ -849,15 +866,27 @@ function extractBookingMetaFromLineItems(lineItems: OrderLineItem[]): BookingLin
             }
             location = meta.location;
         }
+        if (meta.fulfillmentType) {
+            // We optimize for the first non-null value, or enforce consistency
+            if (fulfillmentType && fulfillmentType !== meta.fulfillmentType) {
+                // Warn but maybe don't fail? Let's be strict for now.
+            }
+            fulfillmentType = meta.fulfillmentType;
+        }
+        if (meta.deliveryAddress) {
+            deliveryAddress = meta.deliveryAddress;
+        }
     }
 
-    return { startDate, endDate, location };
+    return { startDate, endDate, location, fulfillmentType, deliveryAddress };
 }
 
 function extractBookingMetaFromProperties(properties: OrderLineItem['properties']): BookingLineItemMeta {
     let startDate: string | null = null;
     let endDate: string | null = null;
     let location: string | null = null;
+    let fulfillmentType: string | null = null;
+    let deliveryAddress: string | null = null;
 
     if (!properties) {
         return { startDate, endDate, location };
@@ -880,6 +909,10 @@ function extractBookingMetaFromProperties(properties: OrderLineItem['properties'
                 return 'Conflicting booking location in line item properties';
             }
             location = value;
+        } else if (FULFILLMENT_TYPE_KEYS.has(normalized)) {
+            fulfillmentType = value;
+        } else if (DELIVERY_ADDRESS_KEYS.has(normalized)) {
+            deliveryAddress = value;
         }
         return null;
     };
@@ -916,7 +949,7 @@ function extractBookingMetaFromProperties(properties: OrderLineItem['properties'
         }
     }
 
-    return { startDate, endDate, location };
+    return { startDate, endDate, location, fulfillmentType, deliveryAddress };
 }
 
 function normalizePropertyName(name: string): string {

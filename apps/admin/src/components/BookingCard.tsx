@@ -11,6 +11,8 @@ export interface Booking {
     order_id: number | null;
     invalid_reason: string | null;
     created_at: string;
+    fulfillment_type?: string | null;
+    delivery_address?: string | null;
 }
 
 interface BookingCardProps {
@@ -86,6 +88,12 @@ export function BookingCard({ booking, onMarkComplete }: BookingCardProps) {
                             <Text as="p" tone="subdued" variant="bodySm">
                                 Location: {booking.location_code}
                             </Text>
+                            {booking.fulfillment_type && (
+                                <Text as="p" tone="subdued" variant="bodySm">
+                                    {booking.fulfillment_type === 'Pick Up' ? '📍 Pick Up' : '🚚 Delivery'}
+                                    {booking.delivery_address ? ` • ${booking.delivery_address}` : ''}
+                                </Text>
+                            )}
                             <div style={{ marginTop: '4px' }}>
                                 <Badge tone={badgeTone as 'info' | 'success' | 'critical'}>{booking.status}</Badge>
                             </div>

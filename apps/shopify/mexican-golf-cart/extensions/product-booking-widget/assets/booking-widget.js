@@ -2,8 +2,24 @@
 document.addEventListener('DOMContentLoaded', () => {
     const forms = document.querySelectorAll('.gc-booking-form');
 
+    // ============================================
+    // STATIC CONFIGURATION (Hardcoded for Performance)
+    // This widget is single-store only - no dynamic config needed
+    // ============================================
+    const STATIC_LOCATIONS = [
+        { code: 'la_cruz', name: 'La Cruz' },
+        { code: 'punta_mita', name: 'Punta Mita' },
+        { code: 'san_pancho', name: 'San Pancho' },
+        { code: 'sayulita', name: 'Sayulita' }
+    ];
+
+    const STATIC_PRODUCTS = [
+        { title: 'Golf Cart', product_id: 7841859010662, variant_id: null },
+        { title: 'Polaris Ranger', product_id: 7841859141734, variant_id: null },
+        { title: "6' Soft Top Longboard", product_id: 7841859240038, variant_id: 44340215840870 }
+    ];
+
     // Configuration
-    // const API_BASE = '/apps/rental'; // Removed in favor of direct
     const DEBOUNCE_DELAY = 500;
 
     forms.forEach(form => {
@@ -48,7 +64,8 @@ document.addEventListener('DOMContentLoaded', () => {
             elements.toggle = form.querySelector('.gc-product-toggle');
 
             initDatePickers();
-            fetchConfig();
+            initStaticConfig();  // Instant UI setup with hardcoded data
+            fetchVariantIds();   // Background fetch for variant_ids only
             attachListeners();
 
             // Release on abandon
@@ -95,49 +112,47 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        async function fetchConfig() {
+        // Initialize with hardcoded static config for instant UI
+        function initStaticConfig() {
+            // Populate locations immediately (no network request)
+            elements.location.innerHTML = '<option value="" disabled selected>Select a location</option>';
+            STATIC_LOCATIONS.forEach(loc => {
+                const option = document.createElement('option');
+                option.value = loc.code;
+                option.textContent = loc.name;
+                elements.location.appendChild(option);
+            });
+            if (updateAddressDisplay) updateAddressDisplay();
+
+            // Render product toggle immediately
+            renderProductToggle(STATIC_PRODUCTS);
+        }
+
+        // Background fetch for variant_ids only (needed for booking submission)
+        async function fetchVariantIds() {
             try {
                 const res = await fetch(`${API_BASE}/config?shop=${shopDomain}`);
-                if (!res.ok) {
-                    const txt = await res.text();
-                    throw new Error(`Failed to load config: ${res.status} ${txt}`);
-                }
+                if (!res.ok) return; // Silent fail - UI already working
+
                 const data = await res.json();
+                const products = data.products || [];
 
-                // Locations
-                if (data.locations && data.locations.length > 0) {
-                    elements.location.innerHTML = '<option value="" disabled selected>Select a location</option>';
-                    data.locations.forEach(loc => {
-                        const option = document.createElement('option');
-                        option.value = loc.code;
-                        option.textContent = loc.name;
-                        elements.location.appendChild(option);
-                    });
-                    if (updateAddressDisplay) updateAddressDisplay();
-                } else {
-                    showFatalError();
+                // Update STATIC_PRODUCTS with fetched variant_ids
+                products.forEach(serverProd => {
+                    const staticProd = STATIC_PRODUCTS.find(p => p.product_id === serverProd.product_id);
+                    if (staticProd && serverProd.variant_id) {
+                        staticProd.variant_id = serverProd.variant_id;
+                    }
+                });
+
+                // If current selected product now has variant_id, update it
+                const currentProd = STATIC_PRODUCTS.find(p => p.product_id == productId);
+                if (currentProd && currentProd.variant_id) {
+                    variantId = currentProd.variant_id;
                 }
-
-                // Products
-                let products = data.products || [];
-
-                // Check if products exist
-                if (products.length === 0) {
-                    console.error('No products configured for this shop app.');
-                    updateStatus('Booking system not configured. Please contact support.', 'error');
-                    // Hide form or disable
-                    if (elements.submitBtn) elements.submitBtn.disabled = true;
-                    // Do not render toggle
-                    return;
-                }
-
-                if (products.length > 0) {
-                    renderProductToggle(products);
-                }
-
             } catch (err) {
-                console.error(err);
-                showFatalError();
+                console.warn('Background variant fetch failed:', err);
+                // Widget still functional - just variant_ids may be incomplete
             }
         }
 

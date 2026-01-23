@@ -56,13 +56,15 @@ export function ProductInventory({ stats }: ProductInventoryProps) {
     // For now, let's just show products that have > 0 stats OR are in the list.
     // Better: Sort by booking count descending.
 
-    const merged = products.map(p => {
-        const stat = stats.find(s => s.product_id === p.id);
+    const merged = stats.map(s => {
+        const product = products.find(p => p.id === s.product_id);
         return {
-            ...p,
-            totalBookings: stat ? stat.count : 0,
-            revenue: 0, // We didn't solve per-product revenue yet
-            remainingUnits: 0 // We aren't calculating live availability here yet
+            id: s.product_id,
+            title: product?.title || `Product ID: ${s.product_id}`,
+            image: product?.images[0]?.src || '',
+            totalBookings: s.count,
+            revenue: 0,
+            remainingUnits: 0
         };
     }).sort((a, b) => b.totalBookings - a.totalBookings).slice(0, 5); // Show top 5
 
@@ -80,7 +82,7 @@ export function ProductInventory({ stats }: ProductInventoryProps) {
                                     {/* Left side: Image and Name */}
                                     <InlineStack gap="400" blockAlign="center">
                                         <Thumbnail
-                                            source={product.images[0]?.src || ''}
+                                            source={product.image || ''}
                                             alt={product.title}
                                             size="large"
                                         />

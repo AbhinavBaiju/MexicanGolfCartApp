@@ -559,9 +559,9 @@ async function handleDashboardGet(env: Env, shopId: number): Promise<Response> {
             `SELECT product_id, COUNT(*) as count 
              FROM booking_items 
              JOIN bookings ON bookings.id = booking_items.booking_id 
-             WHERE bookings.status = 'CONFIRMED' 
+             WHERE bookings.shop_id = ? AND bookings.status = 'CONFIRMED' 
              GROUP BY product_id`
-        )
+        ).bind(shopId)
     ]);
 
     // Check bounds since we added a query

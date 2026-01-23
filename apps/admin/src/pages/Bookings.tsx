@@ -86,8 +86,8 @@ export default function Bookings() {
         if (res.ok) {
             loadBookings();
         } else {
-             // Maybe show toast or error
-             console.error('Failed to complete');
+            // Maybe show toast or error
+            console.error('Failed to complete');
         }
     };
 
@@ -176,9 +176,9 @@ export default function Bookings() {
                                     ) : (
                                         <div>
                                             {filteredBookings.map(booking => (
-                                                <BookingCard 
-                                                    key={booking.booking_token} 
-                                                    booking={booking} 
+                                                <BookingCard
+                                                    key={booking.booking_token}
+                                                    booking={booking}
                                                     onMarkComplete={handleMarkComplete}
                                                 />
                                             ))}

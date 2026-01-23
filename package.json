@@ -4,10 +4,14 @@
     "private": true,
     "workspaces": [
         "apps/*",
+        "apps/shopify/*",
         "worker",
         "shared"
     ],
     "scripts": {
+        "dev": "concurrently \"npm run dev:shopify\" \"npm run dev:worker\"",
+        "dev:shopify": "cd apps/shopify/mexican-golf-cart && npm run dev",
+        "dev:worker": "cd worker && npm run dev",
         "test": "echo \"Error: no test specified\" && exit 1"
     },
     "devDependencies": {

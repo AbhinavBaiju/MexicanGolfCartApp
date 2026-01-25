@@ -766,15 +766,6 @@ export default function Agreement() {
               </InlineStack>
 
               {signedDetail.signature_png_base64 ? (
-                <a
-                  href={signedDetail.signature_png_base64}
-                  download={`agreement-signature-${signedDetail.id}.png`}
-                >
-                  Download Signature PNG
-                </a>
-              ) : null}
-
-              {signedDetail.signature_png_base64 ? (
                 <SignedAgreementPdfPreview
                   pdfUrl={signedDetailAgreement.pdf_url}
                   signatureDataUrl={signedDetail.signature_png_base64}
@@ -787,6 +778,7 @@ export default function Agreement() {
                       height: signedDetailAgreement.height,
                     } satisfies NormalizedRect
                   }
+                  signedAgreementId={signedDetail.id}
                 />
               ) : (
                 <Text as="p">Signature missing for this agreement.</Text>

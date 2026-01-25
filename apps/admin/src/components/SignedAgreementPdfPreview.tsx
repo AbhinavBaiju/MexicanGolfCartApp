@@ -1,4 +1,4 @@
-import { BlockStack, Box, InlineError, InlineStack, Spinner, Text } from '@shopify/polaris';
+import { BlockStack, Box, Button, InlineError, InlineStack, Spinner, Text } from '@shopify/polaris';
 import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist';
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
@@ -18,6 +18,8 @@ export interface SignedAgreementPdfPreviewProps {
   signatureDataUrl: string;
   signaturePageNumber: number;
   signatureRect: NormalizedRect;
+  /** Optional ID used in the downloaded filename */
+  signedAgreementId?: string;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -29,6 +31,7 @@ export function SignedAgreementPdfPreview({
   signatureDataUrl,
   signaturePageNumber,
   signatureRect,
+  signedAgreementId,
 }: SignedAgreementPdfPreviewProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -40,6 +43,7 @@ export function SignedAgreementPdfPreview({
   const renderTasks = useRef<Map<number, RenderTask>>(new Map());
   const [pageSizes, setPageSizes] = useState<Record<number, { width: number; height: number }>>({});
   const [canvasesReady, setCanvasesReady] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   // Load PDF document
   useEffect(() => {
@@ -253,16 +257,73 @@ export function SignedAgreementPdfPreview({
     return cleanup;
   }, [pdfDoc, pageCount, containerWidth, canvasesReady]);
 
+  // Use percentage-based positioning so the signature scales with the canvas
+  // The canvas is displayed with CSS `width: 100%; height: auto;` which means
+  // it scales from its intrinsic size. Using percentages ensures the signature
+  // always appears in the correct position regardless of canvas scaling.
   const signatureStyle = useMemo(() => {
+    // We just need to verify the page has been rendered
     const size = pageSizes[signaturePageNumber];
     if (!size) return null;
     return {
-      left: `${signatureRect.x * size.width}px`,
-      top: `${signatureRect.y * size.height}px`,
-      width: `${signatureRect.width * size.width}px`,
-      height: `${signatureRect.height * size.height}px`,
+      left: `${signatureRect.x * 100}%`,
+      top: `${signatureRect.y * 100}%`,
+      width: `${signatureRect.width * 100}%`,
+      height: `${signatureRect.height * 100}%`,
     };
   }, [pageSizes, signaturePageNumber, signatureRect]);
+
+  // Download the signed page as a PNG with the signature composited onto it
+  const handleDownloadSignedPage = useCallback(async () => {
+    const canvas = canvasRefs.current.get(signaturePageNumber);
+    if (!canvas || !signatureDataUrl) return;
+
+    setDownloading(true);
+    try {
+      // Create a new canvas to composite the PDF page + signature
+      const compositeCanvas = document.createElement('canvas');
+      compositeCanvas.width = canvas.width;
+      compositeCanvas.height = canvas.height;
+      const ctx = compositeCanvas.getContext('2d');
+      if (!ctx) {
+        throw new Error('Failed to create canvas context');
+      }
+
+      // Draw the PDF page
+      ctx.drawImage(canvas, 0, 0);
+
+      // Load and draw the signature
+      const signatureImg = new Image();
+      await new Promise<void>((resolve, reject) => {
+        signatureImg.onload = () => resolve();
+        signatureImg.onerror = () => reject(new Error('Failed to load signature image'));
+        signatureImg.src = signatureDataUrl;
+      });
+
+      // Calculate signature position in canvas coordinates (intrinsic dimensions)
+      const sigX = signatureRect.x * canvas.width;
+      const sigY = signatureRect.y * canvas.height;
+      const sigWidth = signatureRect.width * canvas.width;
+      const sigHeight = signatureRect.height * canvas.height;
+
+      // Draw the signature
+      ctx.drawImage(signatureImg, sigX, sigY, sigWidth, sigHeight);
+
+      // Create download link
+      const dataUrl = compositeCanvas.toDataURL('image/png');
+      const link = document.createElement('a');
+      link.href = dataUrl;
+      link.download = `signed-agreement${signedAgreementId ? `-${signedAgreementId}` : ''}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (e) {
+      console.error('Failed to download signed page:', e);
+      setError(e instanceof Error ? e.message : 'Failed to download signed page');
+    } finally {
+      setDownloading(false);
+    }
+  }, [signaturePageNumber, signatureDataUrl, signatureRect, signedAgreementId]);
 
   if (loading) {
     return (
@@ -283,6 +344,15 @@ export function SignedAgreementPdfPreview({
 
   return (
     <BlockStack gap="400">
+      <InlineStack gap="200">
+        <Button
+          onClick={handleDownloadSignedPage}
+          loading={downloading}
+          disabled={!pageSizes[signaturePageNumber] || !signatureDataUrl}
+        >
+          Download Signed Copy (PNG)
+        </Button>
+      </InlineStack>
       <Box>
         <div
           ref={containerRef}

@@ -1,36 +1,40 @@
 (() => {
-  const PDF_JS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.8.69/pdf.min.js';
-  const PDF_WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.8.69/pdf.worker.min.js';
+  const DEFAULT_PDF_JS_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.530/build/pdf.min.mjs';
+  const DEFAULT_PDF_WORKER_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.530/build/pdf.worker.min.mjs';
   const SIGN_BUTTON_LABEL = 'Sign & Checkout';
   const VIEW_PDF_LABEL = 'View PDF';
   const SIGN_PDF_LABEL = 'Sign PDF';
   const SUBMIT_LABEL = 'Submit & Checkout';
+  const DEFAULT_PDF_PAGE_RATIO = 1.294;
 
   let pdfJsLoader = null;
+  let pdfJsConfig = { url: '', workerUrl: '' };
 
-  function loadPdfJs() {
+  function loadPdfJs(pdfJsUrl, workerUrl) {
     if (window.pdfjsLib) {
       return Promise.resolve(window.pdfjsLib);
     }
-    if (pdfJsLoader) {
+    if (pdfJsLoader && pdfJsConfig.url === pdfJsUrl && pdfJsConfig.workerUrl === workerUrl) {
       return pdfJsLoader;
     }
 
-    pdfJsLoader = new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = PDF_JS_URL;
-      script.async = true;
-      script.onload = () => {
-        if (!window.pdfjsLib) {
-          reject(new Error('PDF.js failed to initialize.'));
-          return;
+    pdfJsConfig = { url: pdfJsUrl, workerUrl };
+    pdfJsLoader = import(pdfJsUrl)
+      .then((module) => {
+        const pdfjs = module && (module.pdfjsLib || module);
+        if (!pdfjs || !pdfjs.getDocument) {
+          throw new Error('PDF.js failed to initialize.');
         }
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDF_WORKER_URL;
-        resolve(window.pdfjsLib);
-      };
-      script.onerror = () => reject(new Error('Failed to load PDF.js.'));
-      document.head.appendChild(script);
-    });
+        if (pdfjs.GlobalWorkerOptions && workerUrl) {
+          pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+        }
+        window.pdfjsLib = pdfjs;
+        return pdfjs;
+      })
+      .catch((error) => {
+        pdfJsLoader = null;
+        throw error;
+      });
 
     return pdfJsLoader;
   }
@@ -62,6 +66,8 @@
       this.root = root;
       this.shopDomain = root.dataset.shopDomain || '';
       this.apiBase = root.dataset.apiBase || '/apps/rental';
+      this.pdfJsUrl = root.dataset.pdfJsUrl || DEFAULT_PDF_JS_URL;
+      this.pdfWorkerUrl = root.dataset.pdfWorkerUrl || DEFAULT_PDF_WORKER_URL;
       this.checkoutTargets = [];
       this.state = {
         agreement: null,
@@ -75,7 +81,8 @@
       this.pdf = {
         doc: null,
         url: '',
-        pageNumber: 1
+        pageNumber: 1,
+        fallback: false
       };
       this.signaturePad = {
         canvas: null,
@@ -286,6 +293,12 @@
       const pdfWrapper = document.createElement('div');
       pdfWrapper.className = 'mgc-agreement-pdf';
 
+      const pdfFrame = document.createElement('iframe');
+      pdfFrame.className = 'mgc-agreement-pdf-frame';
+      pdfFrame.setAttribute('title', 'Agreement PDF');
+      pdfFrame.setAttribute('loading', 'lazy');
+      pdfWrapper.appendChild(pdfFrame);
+
       const pdfCanvas = document.createElement('canvas');
       pdfWrapper.appendChild(pdfCanvas);
 
@@ -362,6 +375,7 @@
         signButton,
         viewPdfButton,
         pdfWrapper,
+        pdfFrame,
         pdfCanvas,
         signatureBox,
         signaturePad,
@@ -615,8 +629,13 @@
       const pdfUrl = this.state.agreement.pdf_url;
       if (!pdfUrl) return;
 
+      if (this.pdf.fallback) {
+        await this.renderPdfFallback(pdfUrl);
+        return;
+      }
+
       try {
-        const pdfjs = await loadPdfJs();
+        const pdfjs = await loadPdfJs(this.pdfJsUrl, this.pdfWorkerUrl);
         if (!this.pdf.doc || this.pdf.url !== pdfUrl) {
           this.pdf.doc = await pdfjs.getDocument({ url: pdfUrl }).promise;
           this.pdf.url = pdfUrl;
@@ -638,17 +657,56 @@
         const ctx = canvas.getContext('2d');
         if (!ctx) return;
 
+        this.modal.pdfWrapper.style.height = 'auto';
+        this.modal.pdfCanvas.style.display = 'block';
+        if (this.modal.pdfFrame) {
+          this.modal.pdfFrame.style.display = 'none';
+          this.modal.pdfFrame.removeAttribute('src');
+        }
+
         canvas.width = scaledViewport.width;
         canvas.height = scaledViewport.height;
-        await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
+        await page.render({ canvasContext: ctx, viewport: scaledViewport, canvas }).promise;
 
         this.updateSignatureBoxPosition();
         if (this.state.signatureDataUrl) {
           this.placeSignatureImage();
         }
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to render PDF.';
-        this.setError(message);
+        this.pdf.fallback = true;
+        await this.renderPdfFallback(pdfUrl);
+        this.setError(null);
+      }
+    }
+
+    async renderPdfFallback(pdfUrl) {
+      const agreement = this.state.agreement;
+      if (!agreement) return;
+
+      const pageNumber = clamp(
+        Number(agreement.page_number) || 1,
+        1,
+        Number.MAX_SAFE_INTEGER
+      );
+
+      const pdfFrame = this.modal.pdfFrame;
+      if (!pdfFrame) {
+        this.setError('PDF preview is not available in this browser.');
+        return;
+      }
+
+      const containerWidth = this.modal.pdfWrapper.clientWidth || 640;
+      const ratio = DEFAULT_PDF_PAGE_RATIO;
+      const height = Math.round(containerWidth * ratio);
+      this.modal.pdfWrapper.style.height = `${height}px`;
+
+      pdfFrame.style.display = 'block';
+      pdfFrame.src = `${pdfUrl}#page=${pageNumber}`;
+      this.modal.pdfCanvas.style.display = 'none';
+
+      this.updateSignatureBoxPosition();
+      if (this.state.signatureDataUrl) {
+        this.placeSignatureImage();
       }
     }
 
@@ -658,8 +716,9 @@
 
       const canvas = this.modal.pdfCanvas;
       const box = this.modal.signatureBox;
-      const width = canvas.width;
-      const height = canvas.height;
+      const useCanvas = canvas && canvas.style.display !== 'none' && canvas.width && canvas.height;
+      const width = useCanvas ? canvas.width : this.modal.pdfWrapper.clientWidth;
+      const height = useCanvas ? canvas.height : this.modal.pdfWrapper.clientHeight;
       if (!width || !height) return;
 
       const left = agreement.x * width;

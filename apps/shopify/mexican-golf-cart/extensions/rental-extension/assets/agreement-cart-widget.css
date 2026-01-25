@@ -137,6 +137,14 @@
   height: auto;
 }
 
+.mgc-agreement-pdf-frame {
+  display: none;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #ffffff;
+}
+
 .mgc-agreement-signature-box {
   position: absolute;
   border: 2px dashed #0b3d2e;

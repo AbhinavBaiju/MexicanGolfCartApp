@@ -15,6 +15,9 @@ import {
   IndexTable,
   Box
 } from '@shopify/polaris';
+import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist';
+import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist';
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { useAuthenticatedFetch } from '../api';
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 
@@ -66,69 +69,7 @@ interface SignedAgreementDetailResponse {
   signed_agreement: SignedAgreementDetail;
 }
 
-interface PdfViewport {
-  width: number;
-  height: number;
-}
-
-interface PdfRenderTask {
-  promise: Promise<void>;
-}
-
-interface PdfPageProxy {
-  getViewport: (options: { scale: number }) => PdfViewport;
-  render: (options: { canvasContext: CanvasRenderingContext2D; viewport: PdfViewport }) => PdfRenderTask;
-}
-
-interface PdfDocumentProxy {
-  numPages: number;
-  getPage: (pageNumber: number) => Promise<PdfPageProxy>;
-}
-
-interface PdfJsGlobal {
-  GlobalWorkerOptions: { workerSrc: string };
-  getDocument: (src: string | { url: string }) => { promise: Promise<PdfDocumentProxy> };
-}
-
-type PdfJsWindow = Window & { pdfjsLib?: PdfJsGlobal };
-
-const PDF_JS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.8.69/pdf.min.js';
-const PDF_WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.8.69/pdf.worker.min.js';
-let pdfJsLoader: Promise<PdfJsGlobal> | null = null;
-
-function loadPdfJs(): Promise<PdfJsGlobal> {
-  if (typeof window === 'undefined') {
-    return Promise.reject(new Error('PDF.js requires a browser environment.'));
-  }
-
-  const pdfWindow = window as PdfJsWindow;
-  if (pdfWindow.pdfjsLib) {
-    return Promise.resolve(pdfWindow.pdfjsLib);
-  }
-
-  if (pdfJsLoader) {
-    return pdfJsLoader;
-  }
-
-  pdfJsLoader = new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = PDF_JS_URL;
-    script.async = true;
-    script.onload = () => {
-      const lib = pdfWindow.pdfjsLib;
-      if (!lib) {
-        reject(new Error('PDF.js failed to initialize.'));
-        return;
-      }
-      lib.GlobalWorkerOptions.workerSrc = PDF_WORKER_URL;
-      resolve(lib);
-    };
-    script.onerror = () => reject(new Error('Failed to load PDF.js.'));
-    document.head.appendChild(script);
-  });
-
-  return pdfJsLoader;
-}
+GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 interface RectNormalized {
   x: number;
@@ -205,7 +146,7 @@ export default function Agreement() {
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const overlayRef = useRef<HTMLDivElement | null>(null);
-  const pdfDocRef = useRef<PdfDocumentProxy | null>(null);
+  const pdfDocRef = useRef<PDFDocumentProxy | null>(null);
   const dragStateRef = useRef<DragState | null>(null);
   const [pdfPages, setPdfPages] = useState(1);
   const [pdfRendering, setPdfRendering] = useState(false);
@@ -427,7 +368,7 @@ export default function Agreement() {
       canvas.height = scaledViewport.height;
       container.style.height = `${scaledViewport.height}px`;
 
-      await page.render({ canvasContext: context, viewport: scaledViewport }).promise;
+      await page.render({ canvasContext: context, viewport: scaledViewport, canvas }).promise;
     } finally {
       setPdfRendering(false);
     }
@@ -442,8 +383,8 @@ export default function Agreement() {
         return;
       }
       try {
-        const pdfjs = await loadPdfJs();
-        const doc = await pdfjs.getDocument({ url: activeAgreement.pdf_url }).promise;
+        const loadingTask = getDocument({ url: activeAgreement.pdf_url }) as PDFDocumentLoadingTask;
+        const doc = await loadingTask.promise;
         if (cancelled) return;
         pdfDocRef.current = doc;
         const totalPages = doc.numPages || 1;

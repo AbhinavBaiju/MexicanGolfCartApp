@@ -458,6 +458,7 @@ async function handleInventoryPut(request: Request, env: Env, shopId: number): P
 }
 
 async function handleBookingsGet(request: Request, env: Env, shopId: number): Promise<Response> {
+    // NOTE: This endpoint intentionally returns a flattened list for the admin UI.
     const url = new URL(request.url);
     const status = url.searchParams.get('status');
     const startDate = url.searchParams.get('start_date');
@@ -468,38 +469,56 @@ async function handleBookingsGet(request: Request, env: Env, shopId: number): Pr
         return jsonError('Invalid date range', 400);
     }
 
-    let sql =
-        'SELECT booking_token, status, location_code, start_date, end_date, order_id, invalid_reason, created_at, updated_at, customer_name, customer_email, revenue, fulfillment_type, delivery_address FROM bookings WHERE shop_id = ?';
-    const bindings: (string | number)[] = [shopId];
+        // Look up the shop domain once so we can join to signed_agreements (keyed by shop_domain).
+        const shopRow = await env.DB.prepare('SELECT shop_domain FROM shops WHERE id = ?').bind(shopId).first();
+        const shopDomain = shopRow && isRecord(shopRow) ? (shopRow.shop_domain as string | null) : null;
+
+        let sql =
+                `SELECT b.booking_token, b.status, b.location_code, b.start_date, b.end_date, b.order_id, b.invalid_reason,
+                                b.created_at, b.updated_at, b.customer_name, b.customer_email, b.revenue, b.fulfillment_type, b.delivery_address,
+                                s.id as signed_agreement_id
+                 FROM bookings b
+                 LEFT JOIN signed_agreements s
+                     ON s.order_id = b.order_id AND s.shop_domain = ?
+                 WHERE b.shop_id = ?`;
+        const bindings: (string | number)[] = [shopDomain ?? '', shopId];
     if (status) {
-        sql += ' AND status = ?';
+        sql += ' AND b.status = ?';
         bindings.push(status);
     }
     if (startDate) {
-        sql += ' AND start_date >= ?';
+        sql += ' AND b.start_date >= ?';
         bindings.push(startDate);
     }
     if (endDate) {
-        sql += ' AND end_date <= ?';
+        sql += ' AND b.end_date <= ?';
         bindings.push(endDate);
     }
     if (search) {
         const term = `%${search}%`;
-        sql += ' AND (booking_token LIKE ? OR order_id LIKE ? OR customer_name LIKE ? OR customer_email LIKE ?)';
+        sql += ' AND (b.booking_token LIKE ? OR b.order_id LIKE ? OR b.customer_name LIKE ? OR b.customer_email LIKE ?)';
         bindings.push(term, term, term, term);
     }
-    sql += ' ORDER BY start_date DESC';
+    sql += ' ORDER BY b.start_date DESC';
 
     const rows = await env.DB.prepare(sql).bind(...bindings).all();
     return Response.json({ ok: true, bookings: rows.results ?? [] });
 }
 
 async function handleBookingGet(env: Env, shopId: number, bookingToken: string): Promise<Response> {
+    const shopRow = await env.DB.prepare('SELECT shop_domain FROM shops WHERE id = ?').bind(shopId).first();
+    const shopDomain = shopRow && isRecord(shopRow) ? (shopRow.shop_domain as string | null) : null;
+
     const booking = await env.DB.prepare(
-        `SELECT id, booking_token, status, location_code, start_date, end_date, expires_at, order_id, invalid_reason, created_at, updated_at, customer_name, customer_email, revenue, fulfillment_type, delivery_address
-         FROM bookings WHERE shop_id = ? AND booking_token = ?`
+        `SELECT b.id, b.booking_token, b.status, b.location_code, b.start_date, b.end_date, b.expires_at, b.order_id,
+                b.invalid_reason, b.created_at, b.updated_at, b.customer_name, b.customer_email, b.revenue, b.fulfillment_type, b.delivery_address,
+                s.id as signed_agreement_id
+         FROM bookings b
+         LEFT JOIN signed_agreements s
+           ON s.order_id = b.order_id AND s.shop_domain = ?
+         WHERE b.shop_id = ? AND b.booking_token = ?`
     )
-        .bind(shopId, bookingToken)
+        .bind(shopDomain ?? '', shopId, bookingToken)
         .first();
     if (!booking) {
         return jsonError('Booking not found', 404);
@@ -816,6 +835,12 @@ interface SignedAgreementDetail extends SignedAgreementListItem {
     signature_png_base64: string;
 }
 
+interface SignedAgreementDetailResponse {
+    ok: boolean;
+    signed_agreement: SignedAgreementDetail;
+    agreement: AgreementResponse;
+}
+
 async function handleAgreementCurrent(env: Env, shopDomain: string): Promise<Response> {
     const row = await env.DB.prepare(
         `SELECT id, shop_domain, version, active, title, pdf_storage_type, pdf_storage_key, pdf_sha256,
@@ -1068,9 +1093,11 @@ async function handleAgreementSignedList(request: Request, env: Env, shopDomain:
 
 async function handleAgreementSignedDetail(env: Env, shopDomain: string, signedId: string): Promise<Response> {
     const row = await env.DB.prepare(
-        `SELECT s.id, s.agreement_id, s.cart_token, s.order_id, s.customer_email, s.signed_at, s.status,
+        `SELECT s.id as signed_id, s.agreement_id as agreement_id, s.cart_token, s.order_id, s.customer_email, s.signed_at, s.status,
                 s.signature_png_base64,
-                a.version as agreement_version, a.title as agreement_title
+                a.id, a.shop_domain, a.version, a.active, a.title,
+                a.pdf_storage_type, a.pdf_storage_key, a.pdf_sha256,
+                a.page_number, a.x, a.y, a.width, a.height, a.created_at, a.created_by
          FROM signed_agreements s
          JOIN agreements a ON s.agreement_id = a.id
          WHERE s.shop_domain = ? AND s.id = ?`
@@ -1082,11 +1109,16 @@ async function handleAgreementSignedDetail(env: Env, shopDomain: string, signedI
         return jsonError('Signed agreement not found', 404);
     }
 
+    const agreement = mapAgreementRow(row);
+    if (!agreement) {
+        return jsonError('Failed to read agreement for signed detail', 500);
+    }
+
     const detail: SignedAgreementDetail = {
-        id: readStringField(row, 'id') ?? '',
+        id: readStringField(row, 'signed_id') ?? '',
         agreement_id: readStringField(row, 'agreement_id') ?? '',
-        agreement_version: toNumber(row.agreement_version) ?? 0,
-        agreement_title: readStringField(row, 'agreement_title'),
+        agreement_version: agreement.version,
+        agreement_title: agreement.title,
         cart_token: readStringField(row, 'cart_token') ?? '',
         order_id: readStringField(row, 'order_id'),
         customer_email: readStringField(row, 'customer_email'),
@@ -1095,11 +1127,14 @@ async function handleAgreementSignedDetail(env: Env, shopDomain: string, signedI
         signature_png_base64: readStringField(row, 'signature_png_base64') ?? ''
     };
 
-    if (!detail.id || !detail.signature_png_base64) {
-        return jsonError('Signed agreement data missing', 500);
+    // Only error if the signed agreement ID is missing; empty signature is allowed
+    // (the UI will show "Signature missing" gracefully)
+    if (!detail.id) {
+        return jsonError('Signed agreement ID missing', 500);
     }
 
-    return Response.json({ ok: true, signed_agreement: detail });
+    const response: SignedAgreementDetailResponse = { ok: true, signed_agreement: detail, agreement };
+    return Response.json(response);
 }
 
 async function handleAgreementActivate(env: Env, shopDomain: string, agreementId: string): Promise<Response> {

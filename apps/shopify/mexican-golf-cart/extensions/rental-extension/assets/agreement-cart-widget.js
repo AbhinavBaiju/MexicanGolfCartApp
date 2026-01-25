@@ -5,7 +5,6 @@
   const VIEW_PDF_LABEL = 'View PDF';
   const SIGN_PDF_LABEL = 'Sign PDF';
   const SUBMIT_LABEL = 'Submit & Checkout';
-  const DEFAULT_PDF_PAGE_RATIO = 1.294;
 
   let pdfJsLoader = null;
   let pdfJsConfig = { url: '', workerUrl: '' };
@@ -81,8 +80,9 @@
       this.pdf = {
         doc: null,
         url: '',
-        pageNumber: 1,
-        fallback: false
+        numPages: 0,
+        pageCanvases: [],
+        signaturePageIndex: 0
       };
       this.signaturePad = {
         canvas: null,
@@ -293,19 +293,14 @@
       const pdfWrapper = document.createElement('div');
       pdfWrapper.className = 'mgc-agreement-pdf';
 
-      const pdfFrame = document.createElement('iframe');
-      pdfFrame.className = 'mgc-agreement-pdf-frame';
-      pdfFrame.setAttribute('title', 'Agreement PDF');
-      pdfFrame.setAttribute('loading', 'lazy');
-      pdfWrapper.appendChild(pdfFrame);
+      const pagesContainer = document.createElement('div');
+      pagesContainer.className = 'mgc-agreement-pages';
+      pdfWrapper.appendChild(pagesContainer);
 
-      const pdfCanvas = document.createElement('canvas');
-      pdfWrapper.appendChild(pdfCanvas);
-
-      const signatureBox = document.createElement('div');
-      signatureBox.className = 'mgc-agreement-signature-box';
-      signatureBox.textContent = 'Sign here';
-      pdfWrapper.appendChild(signatureBox);
+      const loadingIndicator = document.createElement('div');
+      loadingIndicator.className = 'mgc-agreement-loading';
+      loadingIndicator.textContent = 'Loading PDF...';
+      pdfWrapper.appendChild(loadingIndicator);
 
       const signaturePad = document.createElement('div');
       signaturePad.className = 'mgc-agreement-signature-pad';
@@ -375,9 +370,8 @@
         signButton,
         viewPdfButton,
         pdfWrapper,
-        pdfFrame,
-        pdfCanvas,
-        signatureBox,
+        pagesContainer,
+        loadingIndicator,
         signaturePad,
         signatureCanvas,
         confirmButton,
@@ -436,14 +430,15 @@
       this.modal.confirmButton.disabled = state === 'submitting' || missingAgreement;
       this.modal.clearButton.disabled = state === 'submitting' || missingAgreement;
 
-      if (state === 'pre-sign') {
-        this.modal.signatureBox.classList.remove('confirmed');
-        this.modal.signatureBox.textContent = 'Sign here';
-        this.modal.signatureBox.innerHTML = 'Sign here';
+      const signatureBox = this.getSignatureBox();
+      if (state === 'pre-sign' && signatureBox) {
+        signatureBox.classList.remove('confirmed');
+        signatureBox.textContent = 'Sign here';
       }
-      if (state === 'confirmed') {
-        this.modal.signatureBox.classList.add('confirmed');
-        this.modal.signatureBox.textContent = '';
+      // Note: For 'confirmed' state, placeSignatureImage() handles adding the signature image
+      // We only need to add the 'confirmed' class here if the image was already placed
+      if (state === 'confirmed' && signatureBox && this.state.signatureDataUrl) {
+        signatureBox.classList.add('confirmed');
       }
     }
 
@@ -531,12 +526,20 @@
 
     placeSignatureImage() {
       if (!this.state.signatureDataUrl) return;
-      this.modal.signatureBox.classList.add('confirmed');
-      this.modal.signatureBox.innerHTML = '';
+      const signatureBox = this.getSignatureBox();
+      if (!signatureBox) return;
+      
+      signatureBox.classList.add('confirmed');
+      signatureBox.innerHTML = '';
       const img = document.createElement('img');
       img.src = this.state.signatureDataUrl;
       img.alt = 'Signature';
-      this.modal.signatureBox.appendChild(img);
+      signatureBox.appendChild(img);
+
+      // Scroll the signature box into view so the user can see their signature on the PDF
+      setTimeout(() => {
+        signatureBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 100);
     }
 
     async submitSignature() {
@@ -603,8 +606,11 @@
       this.state.signatureDataUrl = '';
       this.state.signedAgreementId = '';
       this.state.signedRentableKey = '';
-      this.modal.signatureBox.classList.remove('confirmed');
-      this.modal.signatureBox.innerHTML = 'Sign here';
+      const signatureBox = this.getSignatureBox();
+      if (signatureBox) {
+        signatureBox.classList.remove('confirmed');
+        signatureBox.innerHTML = 'Sign here';
+      }
       await this.updateCartAttributes('', '');
     }
 
@@ -629,107 +635,114 @@
       const pdfUrl = this.state.agreement.pdf_url;
       if (!pdfUrl) return;
 
-      if (this.pdf.fallback) {
-        await this.renderPdfFallback(pdfUrl);
-        return;
-      }
+      const pagesContainer = this.modal.pagesContainer;
+      const loadingIndicator = this.modal.loadingIndicator;
+      
+      // Show loading indicator
+      loadingIndicator.style.display = 'block';
 
       try {
         const pdfjs = await loadPdfJs(this.pdfJsUrl, this.pdfWorkerUrl);
+        
+        // Only reload if PDF URL changed
         if (!this.pdf.doc || this.pdf.url !== pdfUrl) {
           this.pdf.doc = await pdfjs.getDocument({ url: pdfUrl }).promise;
           this.pdf.url = pdfUrl;
+          this.pdf.numPages = this.pdf.doc.numPages;
         }
 
-        const pageNumber = clamp(
+        // Clear existing pages
+        pagesContainer.innerHTML = '';
+        this.pdf.pageCanvases = [];
+
+        // Determine the page where signature should appear (1-indexed from API)
+        const signaturePageNumber = clamp(
           Number(this.state.agreement.page_number) || 1,
           1,
-          this.pdf.doc.numPages || 1
+          this.pdf.numPages
         );
+        this.pdf.signaturePageIndex = signaturePageNumber - 1;
 
-        this.pdf.pageNumber = pageNumber;
-        const page = await this.pdf.doc.getPage(pageNumber);
-        const viewport = page.getViewport({ scale: 1 });
-        const containerWidth = this.modal.pdfWrapper.clientWidth || 640;
-        const scale = containerWidth / viewport.width;
-        const scaledViewport = page.getViewport({ scale });
-        const canvas = this.modal.pdfCanvas;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
+        // Calculate container width accounting for padding (16px on each side)
+        const pdfWrapperWidth = this.modal.pdfWrapper.clientWidth || 640;
+        const containerWidth = Math.max(pdfWrapperWidth - 32, 300);
 
-        this.modal.pdfWrapper.style.height = 'auto';
-        this.modal.pdfCanvas.style.display = 'block';
-        if (this.modal.pdfFrame) {
-          this.modal.pdfFrame.style.display = 'none';
-          this.modal.pdfFrame.removeAttribute('src');
+        // Render all pages
+        for (let pageNum = 1; pageNum <= this.pdf.numPages; pageNum++) {
+          const page = await this.pdf.doc.getPage(pageNum);
+          const viewport = page.getViewport({ scale: 1 });
+          const scale = containerWidth / viewport.width;
+          const scaledViewport = page.getViewport({ scale });
+
+          // Create a page wrapper
+          const pageWrapper = document.createElement('div');
+          pageWrapper.className = 'mgc-agreement-page';
+          pageWrapper.dataset.pageNumber = String(pageNum);
+
+          // Create canvas for this page
+          const canvas = document.createElement('canvas');
+          canvas.className = 'mgc-agreement-page-canvas';
+          canvas.width = scaledViewport.width;
+          canvas.height = scaledViewport.height;
+          
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
+          }
+
+          pageWrapper.appendChild(canvas);
+          this.pdf.pageCanvases.push({ canvas, pageNum, width: scaledViewport.width, height: scaledViewport.height });
+
+          // Add signature box only on the designated page
+          if (pageNum === signaturePageNumber) {
+            const signatureBox = this.createSignatureBox();
+            pageWrapper.appendChild(signatureBox);
+            this.updateSignatureBoxPosition(signatureBox, scaledViewport.width, scaledViewport.height);
+          }
+
+          pagesContainer.appendChild(pageWrapper);
         }
 
-        canvas.width = scaledViewport.width;
-        canvas.height = scaledViewport.height;
-        await page.render({ canvasContext: ctx, viewport: scaledViewport, canvas }).promise;
+        // Hide loading indicator
+        loadingIndicator.style.display = 'none';
 
-        this.updateSignatureBoxPosition();
+        // If there's already a signature, place it
         if (this.state.signatureDataUrl) {
           this.placeSignatureImage();
         }
       } catch (error) {
-        this.pdf.fallback = true;
-        await this.renderPdfFallback(pdfUrl);
-        this.setError(null);
+        console.error('PDF rendering failed:', error);
+        loadingIndicator.textContent = 'Failed to load PDF. Please try again.';
+        this.setError('Unable to load PDF. Please refresh and try again.');
       }
     }
 
-    async renderPdfFallback(pdfUrl) {
-      const agreement = this.state.agreement;
-      if (!agreement) return;
-
-      const pageNumber = clamp(
-        Number(agreement.page_number) || 1,
-        1,
-        Number.MAX_SAFE_INTEGER
-      );
-
-      const pdfFrame = this.modal.pdfFrame;
-      if (!pdfFrame) {
-        this.setError('PDF preview is not available in this browser.');
-        return;
-      }
-
-      const containerWidth = this.modal.pdfWrapper.clientWidth || 640;
-      const ratio = DEFAULT_PDF_PAGE_RATIO;
-      const height = Math.round(containerWidth * ratio);
-      this.modal.pdfWrapper.style.height = `${height}px`;
-
-      pdfFrame.style.display = 'block';
-      pdfFrame.src = `${pdfUrl}#page=${pageNumber}`;
-      this.modal.pdfCanvas.style.display = 'none';
-
-      this.updateSignatureBoxPosition();
-      if (this.state.signatureDataUrl) {
-        this.placeSignatureImage();
-      }
+    createSignatureBox() {
+      const signatureBox = document.createElement('div');
+      signatureBox.className = 'mgc-agreement-signature-box';
+      signatureBox.textContent = 'Sign here';
+      return signatureBox;
     }
 
-    updateSignatureBoxPosition() {
+    updateSignatureBoxPosition(signatureBox, canvasWidth, canvasHeight) {
       const agreement = this.state.agreement;
-      if (!agreement) return;
+      if (!agreement || !signatureBox) return;
 
-      const canvas = this.modal.pdfCanvas;
-      const box = this.modal.signatureBox;
-      const useCanvas = canvas && canvas.style.display !== 'none' && canvas.width && canvas.height;
-      const width = useCanvas ? canvas.width : this.modal.pdfWrapper.clientWidth;
-      const height = useCanvas ? canvas.height : this.modal.pdfWrapper.clientHeight;
-      if (!width || !height) return;
+      const left = agreement.x * canvasWidth;
+      const top = agreement.y * canvasHeight;
+      const boxWidth = agreement.width * canvasWidth;
+      const boxHeight = agreement.height * canvasHeight;
 
-      const left = agreement.x * width;
-      const top = agreement.y * height;
-      const boxWidth = agreement.width * width;
-      const boxHeight = agreement.height * height;
+      signatureBox.style.left = `${left}px`;
+      signatureBox.style.top = `${top}px`;
+      signatureBox.style.width = `${boxWidth}px`;
+      signatureBox.style.height = `${boxHeight}px`;
+    }
 
-      box.style.left = `${left}px`;
-      box.style.top = `${top}px`;
-      box.style.width = `${boxWidth}px`;
-      box.style.height = `${boxHeight}px`;
+    getSignatureBox() {
+      // Find the signature box in the pages container
+      const pagesContainer = this.modal.pagesContainer;
+      return pagesContainer ? pagesContainer.querySelector('.mgc-agreement-signature-box') : null;
     }
 
     handleFocusTrap(event) {

@@ -20,6 +20,7 @@ import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { useAuthenticatedFetch } from '../api';
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { SignedAgreementPdfPreview, type NormalizedRect } from '../components/SignedAgreementPdfPreview';
 
 interface AgreementData {
   id: string;
@@ -67,6 +68,7 @@ interface SignedAgreementsResponse {
 interface SignedAgreementDetailResponse {
   ok: boolean;
   signed_agreement: SignedAgreementDetail;
+  agreement: AgreementData;
 }
 
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -161,6 +163,7 @@ export default function Agreement() {
   const [filterEndDate, setFilterEndDate] = useState('');
 
   const [signedDetail, setSignedDetail] = useState<SignedAgreementDetail | null>(null);
+  const [signedDetailAgreement, setSignedDetailAgreement] = useState<AgreementData | null>(null);
   const [signedDetailOpen, setSignedDetailOpen] = useState(false);
 
   const loadAgreement = useCallback(async () => {
@@ -319,6 +322,7 @@ export default function Agreement() {
       }
       const data: SignedAgreementDetailResponse = await response.json();
       setSignedDetail(data.signed_agreement);
+      setSignedDetailAgreement(data.agreement);
       setSignedDetailOpen(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to load signature.';
@@ -745,30 +749,47 @@ export default function Agreement() {
         open={signedDetailOpen}
         onClose={() => setSignedDetailOpen(false)}
         title="Signed Agreement"
+        size="fullScreen"
       >
         <Modal.Section>
-          {signedDetail ? (
+          {signedDetail && signedDetailAgreement ? (
             <BlockStack gap="200">
               <Text as="p">Signed at {formatDateTime(signedDetail.signed_at)}</Text>
               <Text as="p">Order ID: {signedDetail.order_id || 'N/A'}</Text>
               <Text as="p">Email: {signedDetail.customer_email || 'N/A'}</Text>
               <Text as="p">Agreement v{signedDetail.agreement_version}</Text>
+
+              <InlineStack gap="200" wrap>
+                <Button url={signedDetailAgreement.pdf_url} external>
+                  Download Original PDF
+                </Button>
+              </InlineStack>
+
               {signedDetail.signature_png_base64 ? (
-                <BlockStack gap="200">
-                  <img
-                    src={signedDetail.signature_png_base64}
-                    alt="Signature preview"
-                    style={{ maxWidth: '100%', border: '1px solid #dfe3e8', borderRadius: '8px' }}
-                  />
-                  <a
-                    href={signedDetail.signature_png_base64}
-                    download={`agreement-signature-${signedDetail.id}.png`}
-                  >
-                    Download Signature
-                  </a>
-                </BlockStack>
+                <a
+                  href={signedDetail.signature_png_base64}
+                  download={`agreement-signature-${signedDetail.id}.png`}
+                >
+                  Download Signature PNG
+                </a>
+              ) : null}
+
+              {signedDetail.signature_png_base64 ? (
+                <SignedAgreementPdfPreview
+                  pdfUrl={signedDetailAgreement.pdf_url}
+                  signatureDataUrl={signedDetail.signature_png_base64}
+                  signaturePageNumber={signedDetailAgreement.page_number || 1}
+                  signatureRect={
+                    {
+                      x: signedDetailAgreement.x,
+                      y: signedDetailAgreement.y,
+                      width: signedDetailAgreement.width,
+                      height: signedDetailAgreement.height,
+                    } satisfies NormalizedRect
+                  }
+                />
               ) : (
-                <Text as="p">Signature preview unavailable.</Text>
+                <Text as="p">Signature missing for this agreement.</Text>
               )}
             </BlockStack>
           ) : (

@@ -1,6 +1,8 @@
-import { BlockStack, Text, InlineStack, Badge, Button, Modal } from '@shopify/polaris';
+import { BlockStack, Text, InlineError, InlineStack, Spinner, Badge, Button, Modal } from '@shopify/polaris';
 import { ViewIcon } from '@shopify/polaris-icons';
 import { useState } from 'react';
+import { useAuthenticatedFetch } from '../api';
+import { SignedAgreementPdfPreview, type NormalizedRect } from './SignedAgreementPdfPreview';
 
 export interface Booking {
     booking_token: string;
@@ -9,10 +11,39 @@ export interface Booking {
     start_date: string;
     end_date: string;
     order_id: number | null;
+    signed_agreement_id?: string | null;
     invalid_reason: string | null;
     created_at: string;
     fulfillment_type?: string | null;
     delivery_address?: string | null;
+}
+
+interface AgreementData {
+    id: string;
+    version: number;
+    title: string | null;
+    pdf_url: string;
+    page_number: number;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+}
+
+interface SignedAgreementDetail {
+    id: string;
+    agreement_version: number;
+    signed_at: string;
+    order_id: string | null;
+    customer_email: string | null;
+    status: string;
+    signature_png_base64: string;
+}
+
+interface SignedAgreementDetailResponse {
+    ok: boolean;
+    signed_agreement: SignedAgreementDetail;
+    agreement: AgreementData;
 }
 
 interface BookingCardProps {
@@ -21,8 +52,15 @@ interface BookingCardProps {
 }
 
 export function BookingCard({ booking, onMarkComplete }: BookingCardProps) {
+    const fetch = useAuthenticatedFetch();
     const [modalOpen, setModalOpen] = useState(false);
     const [completing, setCompleting] = useState(false);
+
+    const [agreementModalOpen, setAgreementModalOpen] = useState(false);
+    const [agreementLoading, setAgreementLoading] = useState(false);
+    const [agreementError, setAgreementError] = useState<string | null>(null);
+    const [signedAgreement, setSignedAgreement] = useState<SignedAgreementDetail | null>(null);
+    const [agreementDoc, setAgreementDoc] = useState<AgreementData | null>(null);
 
     let badgeTone = 'info';
     if (booking.status === 'CONFIRMED') badgeTone = 'success';
@@ -42,6 +80,34 @@ export function BookingCard({ booking, onMarkComplete }: BookingCardProps) {
             setModalOpen(false);
         } finally {
             setCompleting(false);
+        }
+    };
+
+    const openAgreementModal = async () => {
+        setAgreementModalOpen(true);
+        setAgreementError(null);
+        setSignedAgreement(null);
+        setAgreementDoc(null);
+
+        if (!booking.signed_agreement_id) {
+            setAgreementError('No signed agreement is linked to this booking yet.');
+            return;
+        }
+
+        setAgreementLoading(true);
+        try {
+            const response = await fetch(`/agreement/signed/${booking.signed_agreement_id}`);
+            if (!response.ok) {
+                const data = await response.json().catch(() => null);
+                throw new Error(data?.error || 'Failed to load signed agreement.');
+            }
+            const data: SignedAgreementDetailResponse = await response.json();
+            setSignedAgreement(data.signed_agreement);
+            setAgreementDoc(data.agreement);
+        } catch (e: unknown) {
+            setAgreementError(e instanceof Error ? e.message : 'Failed to load signed agreement.');
+        } finally {
+            setAgreementLoading(false);
         }
     };
 
@@ -103,7 +169,14 @@ export function BookingCard({ booking, onMarkComplete }: BookingCardProps) {
                     {/* Right Section: Actions and Date */}
                     <BlockStack align="end" gap="400">
                         <InlineStack gap="200">
-                            <Button icon={ViewIcon} variant="secondary" />
+                            <Button
+                                icon={ViewIcon}
+                                variant="secondary"
+                                onClick={openAgreementModal}
+                                disabled={!booking.signed_agreement_id}
+                            >
+                                View agreement
+                            </Button>
                             <Button variant="secondary">Manage</Button>
                             <Button
                                 variant="primary"
@@ -148,6 +221,53 @@ export function BookingCard({ booking, onMarkComplete }: BookingCardProps) {
                     <Text as="p">
                         Are you sure you want to mark this booking as completed? This will update the status to Fulfilled.
                     </Text>
+                </Modal.Section>
+            </Modal>
+
+            <Modal
+                open={agreementModalOpen}
+                onClose={() => setAgreementModalOpen(false)}
+                title="Signed agreement"
+                size="fullScreen"
+            >
+                <Modal.Section>
+                    <BlockStack gap="300">
+                        {agreementError && <InlineError message={agreementError} fieldID="booking-agreement-error" />}
+
+                        {agreementLoading ? (
+                            <InlineStack gap="200" align="start" blockAlign="center">
+                                <Spinner size="small" />
+                                <Text as="span">Loading agreement…</Text>
+                            </InlineStack>
+                        ) : signedAgreement && agreementDoc ? (
+                            <BlockStack gap="200">
+                                <Text as="p">Signed at {signedAgreement.signed_at}</Text>
+                                <Text as="p">Order ID: {signedAgreement.order_id || 'N/A'}</Text>
+                                <Text as="p">Email: {signedAgreement.customer_email || 'N/A'}</Text>
+                                <Text as="p">Agreement v{signedAgreement.agreement_version}</Text>
+
+                                {signedAgreement.signature_png_base64 ? (
+                                    <SignedAgreementPdfPreview
+                                        pdfUrl={agreementDoc.pdf_url}
+                                        signatureDataUrl={signedAgreement.signature_png_base64}
+                                        signaturePageNumber={agreementDoc.page_number || 1}
+                                        signatureRect={
+                                            {
+                                                x: agreementDoc.x,
+                                                y: agreementDoc.y,
+                                                width: agreementDoc.width,
+                                                height: agreementDoc.height,
+                                            } satisfies NormalizedRect
+                                        }
+                                    />
+                                ) : (
+                                    <Text as="p">Signature missing for this agreement.</Text>
+                                )}
+                            </BlockStack>
+                        ) : (
+                            <Text as="p">Select a booking to view its agreement.</Text>
+                        )}
+                    </BlockStack>
                 </Modal.Section>
             </Modal>
         </>

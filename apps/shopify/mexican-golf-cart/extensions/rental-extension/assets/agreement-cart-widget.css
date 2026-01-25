@@ -123,26 +123,44 @@
   position: relative;
   border: 1px solid #e1e4e8;
   border-radius: 12px;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   background: #f7f7f7;
+  max-height: 60vh;
 }
 
 .mgc-agreement-pdf.is-visible {
   display: block;
 }
 
-.mgc-agreement-pdf canvas {
+.mgc-agreement-pages {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+}
+
+.mgc-agreement-page {
+  position: relative;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.mgc-agreement-page-canvas {
   display: block;
   width: 100%;
   height: auto;
 }
 
-.mgc-agreement-pdf-frame {
-  display: none;
-  width: 100%;
-  height: 100%;
-  border: 0;
-  background: #ffffff;
+.mgc-agreement-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  color: #666;
+  font-size: 14px;
 }
 
 .mgc-agreement-signature-box {

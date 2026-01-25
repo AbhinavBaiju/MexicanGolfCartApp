@@ -44,6 +44,11 @@ interface OrderLineItemProperty {
     value: string | number | null;
 }
 
+interface OrderNoteAttribute {
+    name: string;
+    value: string | number | null;
+}
+
 interface OrderLineItem {
     product_id: number | null;
     variant_id: number | null;
@@ -58,6 +63,7 @@ interface OrderWebhookPayload {
     customer: { first_name?: string; last_name?: string; email?: string } | null;
     current_subtotal_price: string | null;
     line_items: OrderLineItem[];
+    note_attributes: OrderNoteAttribute[];
 }
 
 interface ConfirmOrderResult {
@@ -148,6 +154,11 @@ export async function confirmBookingsFromOrder(
             return { status: 200, body: 'Invalid order payload' };
         }
 
+        const customerName = [order.customer?.first_name, order.customer?.last_name].filter(Boolean).join(' ') || 'Guest';
+        const customerEmail = order.customer?.email || order.email || '';
+
+        await linkAgreementSignature(env.DB, shopDomain, order.id, order.note_attributes, customerEmail);
+
         const extraction = extractBookingTokens(order.line_items);
         if (extraction.tokens.length === 0) {
             return { status: 200, body: 'No booking tokens found' };
@@ -158,8 +169,6 @@ export async function confirmBookingsFromOrder(
         let cancellationTriggered = false;
         let cancellationResult: OrderCancellationResult | null = null;
 
-        const customerName = [order.customer?.first_name, order.customer?.last_name].filter(Boolean).join(' ') || 'Guest';
-        const customerEmail = order.customer?.email || order.email || '';
         // Heuristic: distribute revenue evenly or just store 0 for now? 
         // Better: sum up the price of line items for this specific booking token.
         // But price is in line_items[].price (which we aren't parsing yet).
@@ -724,8 +733,23 @@ function parseOrderPayload(rawBody: string): OrderWebhookPayload | null {
         email: readString(data.customer.email) || undefined
     } : null;
     const current_subtotal_price = readStringOrNumber(data.current_subtotal_price);
+    const noteAttributesValue = data.note_attributes;
+    const noteAttributes: OrderNoteAttribute[] = [];
+    if (Array.isArray(noteAttributesValue)) {
+        for (const entry of noteAttributesValue) {
+            if (!isRecord(entry)) {
+                continue;
+            }
+            const name = readString(entry.name);
+            const value = readStringOrNumber(entry.value);
+            if (!name || value === null) {
+                continue;
+            }
+            noteAttributes.push({ name, value });
+        }
+    }
 
-    return { id: orderId, line_items: lineItems, email, customer, current_subtotal_price };
+    return { id: orderId, line_items: lineItems, email, customer, current_subtotal_price, note_attributes: noteAttributes };
 }
 
 function parseLineItem(value: unknown): OrderLineItem | null {
@@ -752,6 +776,50 @@ function parseLineItem(value: unknown): OrderLineItem | null {
         price,
         properties,
     };
+}
+
+async function linkAgreementSignature(
+    db: D1Database,
+    shopDomain: string,
+    orderId: number,
+    noteAttributes: OrderNoteAttribute[],
+    customerEmail: string
+): Promise<void> {
+    const agreementSignatureId = extractAgreementSignatureId(noteAttributes);
+    if (!agreementSignatureId) {
+        return;
+    }
+
+    const orderIdValue = orderId.toString();
+    const emailValue = customerEmail.trim() || null;
+
+    await db.prepare(
+        `UPDATE signed_agreements
+         SET order_id = ?,
+             status = 'linked_to_order',
+             customer_email = CASE
+                 WHEN customer_email IS NULL OR customer_email = '' THEN ?
+                 ELSE customer_email
+             END
+         WHERE shop_domain = ? AND id = ?`
+    )
+        .bind(orderIdValue, emailValue, shopDomain, agreementSignatureId)
+        .run();
+}
+
+function extractAgreementSignatureId(noteAttributes: OrderNoteAttribute[]): string | null {
+    for (const attr of noteAttributes) {
+        const name = normalizePropertyName(attr.name);
+        if (name === 'agreement_signature_id') {
+            if (typeof attr.value === 'number') {
+                return attr.value.toString();
+            }
+            if (typeof attr.value === 'string' && attr.value.trim()) {
+                return attr.value.trim();
+            }
+        }
+    }
+    return null;
 }
 
 function extractBookingTokens(lineItems: OrderLineItem[]): TokenExtractionResult {

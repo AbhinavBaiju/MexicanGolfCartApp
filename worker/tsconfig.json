@@ -1,5 +1,6 @@
 {
     "compilerOptions": {
+        "preserveSymlinks": true,
         "target": "esnext",
         "module": "esnext",
         "moduleResolution": "bundler",

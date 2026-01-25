@@ -70,15 +70,14 @@ export async function handleProxyRequest(request: Request, env: Env): Promise<Re
         });
     }
 
-    // 1. Verify Signature 
-    // TODO: Re-enable signature verification after debugging App Proxy
-    // const isDev = env.ENVIRONMENT === 'dev';
-    // if (!isDev) {
-    //     const valid = await verifyProxySignature(request, env.SHOPIFY_API_SECRET);
-    //     if (!valid) {
-    //         return new Response('Invalid signature', { status: 401 });
-    //     }
-    // }
+    const isAgreementSign = url.pathname.endsWith('/agreement/sign');
+    const isDev = env.ENVIRONMENT === 'dev';
+    if (isAgreementSign && !isDev) {
+        const valid = await verifyProxySignature(request, env.SHOPIFY_API_SECRET);
+        if (!valid) {
+            return new Response('Invalid signature', { status: 401, headers: corsHeaders });
+        }
+    }
 
     if (!shop) {
         return new Response('Missing shop parameter', { status: 400, headers: corsHeaders });
@@ -104,6 +103,18 @@ export async function handleProxyRequest(request: Request, env: Env): Promise<Re
             response = new Response('Method Not Allowed', { status: 405 });
         } else {
             response = await handleConfig(env, shop);
+        }
+    } else if (url.pathname.endsWith('/agreement/current')) {
+        if (request.method.toUpperCase() !== 'GET') {
+            response = new Response('Method Not Allowed', { status: 405 });
+        } else {
+            response = await handleAgreementCurrent(env, shop);
+        }
+    } else if (url.pathname.endsWith('/agreement/sign')) {
+        if (request.method.toUpperCase() !== 'POST') {
+            response = new Response('Method Not Allowed', { status: 405 });
+        } else {
+            response = await handleAgreementSign(request, env, shop);
         }
     } else {
         response = new Response('Not Found', { status: 404 });
@@ -535,6 +546,156 @@ async function handleConfig(env: Env, shopDomain: string): Promise<Response> {
     }
 }
 
+interface AgreementPublicResponse {
+    id: string;
+    version: number;
+    title: string | null;
+    pdf_url: string;
+    pdf_storage_type: string;
+    pdf_sha256: string | null;
+    page_number: number;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+}
+
+async function handleAgreementCurrent(env: Env, shopDomain: string): Promise<Response> {
+    try {
+        const shopStmt = await env.DB.prepare('SELECT id FROM shops WHERE shop_domain = ?')
+            .bind(shopDomain)
+            .first();
+        if (!shopStmt) {
+            return Response.json({ ok: false, error: 'Shop not found' }, { status: 404 });
+        }
+        const shopId = shopStmt.id as number;
+
+        const agreementRow = await env.DB.prepare(
+            `SELECT id, version, title, pdf_storage_type, pdf_storage_key, pdf_sha256,
+                    page_number, x, y, width, height
+             FROM agreements
+             WHERE shop_domain = ? AND active = 1
+             ORDER BY version DESC
+             LIMIT 1`
+        )
+            .bind(shopDomain)
+            .first();
+
+        const productsRows = await env.DB.prepare(
+            'SELECT product_id FROM products WHERE shop_id = ? AND rentable = 1 ORDER BY product_id'
+        )
+            .bind(shopId)
+            .all();
+        const rentableProductIds = (productsRows.results ?? [])
+            .filter(isRecord)
+            .map((row) => toNumber(row.product_id))
+            .filter((value): value is number => typeof value === 'number');
+
+        if (!agreementRow || !isRecord(agreementRow)) {
+            return Response.json({ ok: true, agreement: null, rentable_product_ids: rentableProductIds });
+        }
+
+        const agreement = mapAgreementPublicRow(agreementRow);
+        if (!agreement) {
+            return Response.json({ ok: false, error: 'Agreement data invalid' }, { status: 500 });
+        }
+
+        return Response.json({ ok: true, agreement, rentable_product_ids: rentableProductIds });
+    } catch (e) {
+        console.error('Agreement current failed', e);
+        return Response.json({ ok: false, error: 'Internal Server Error' }, { status: 500 });
+    }
+}
+
+async function handleAgreementSign(request: Request, env: Env, shopDomain: string): Promise<Response> {
+    const body = await readJsonBody(request);
+    if (!body) {
+        return Response.json({ ok: false, error: 'Invalid JSON body' }, { status: 400 });
+    }
+
+    const cartToken = getString(body, 'cart_token');
+    const agreementId = getString(body, 'agreement_id');
+    const signatureDataUrl = getString(body, 'signature_data_url');
+
+    if (!cartToken || !agreementId || !signatureDataUrl) {
+        return Response.json({ ok: false, error: 'Missing required fields' }, { status: 400 });
+    }
+
+    if (!isPngDataUrl(signatureDataUrl)) {
+        return Response.json({ ok: false, error: 'Signature must be a PNG data URL' }, { status: 400 });
+    }
+
+    try {
+        const agreementRow = await env.DB.prepare(
+            'SELECT id FROM agreements WHERE shop_domain = ? AND id = ? AND active = 1'
+        )
+            .bind(shopDomain, agreementId)
+            .first();
+
+        if (!agreementRow) {
+            return Response.json({ ok: false, error: 'Agreement not found' }, { status: 404 });
+        }
+
+        const signedId = crypto.randomUUID();
+        const signedAt = new Date().toISOString();
+
+        await env.DB.prepare(
+            `INSERT INTO signed_agreements (
+                id, shop_domain, agreement_id, cart_token, signature_png_base64, signed_at, status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, 'pending')`
+        )
+            .bind(signedId, shopDomain, agreementId, cartToken, signatureDataUrl, signedAt)
+            .run();
+
+        return Response.json({ ok: true, signed_agreement_id: signedId });
+    } catch (e) {
+        console.error('Agreement sign failed', e);
+        return Response.json({ ok: false, error: 'Internal Server Error' }, { status: 500 });
+    }
+}
+
+function mapAgreementPublicRow(row: Record<string, unknown>): AgreementPublicResponse | null {
+    const id = readStringField(row, 'id');
+    const pdfStorageKey = readStringField(row, 'pdf_storage_key');
+    const pdfStorageType = readStringField(row, 'pdf_storage_type');
+    if (!id || !pdfStorageKey || !pdfStorageType) {
+        return null;
+    }
+
+    const version = toNumber(row.version);
+    const pageNumber = toNumber(row.page_number);
+    const x = toNumber(row.x);
+    const y = toNumber(row.y);
+    const width = toNumber(row.width);
+    const height = toNumber(row.height);
+
+    if (
+        version === null ||
+        pageNumber === null ||
+        x === null ||
+        y === null ||
+        width === null ||
+        height === null
+    ) {
+        return null;
+    }
+
+    return {
+        id,
+        version,
+        title: readStringField(row, 'title'),
+        pdf_url: pdfStorageKey,
+        pdf_storage_type: pdfStorageType,
+        pdf_sha256: readStringField(row, 'pdf_sha256'),
+        page_number: pageNumber,
+        x,
+        y,
+        width,
+        height
+    };
+}
+
 function normalizeHoldItems(
     items: HoldRequestItemInput[],
     productMap: Map<number, { variant_id: number | null; rentable: number; default_capacity: number }>
@@ -681,4 +842,32 @@ function getOptionalNumber(record: Record<string, unknown>, key: string): number
         return undefined;
     }
     return value;
+}
+
+function readStringField(row: Record<string, unknown>, key: string): string | null {
+    const value = row[key];
+    if (typeof value === 'string') {
+        return value;
+    }
+    if (typeof value === 'number') {
+        return value.toString();
+    }
+    return null;
+}
+
+function toNumber(value: unknown): number | null {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return value;
+    }
+    if (typeof value === 'string' && value.trim() !== '') {
+        const parsed = Number(value);
+        if (Number.isFinite(parsed)) {
+            return parsed;
+        }
+    }
+    return null;
+}
+
+function isPngDataUrl(value: string): boolean {
+    return value.startsWith('data:image/png;base64,') && value.length > 'data:image/png;base64,'.length;
 }

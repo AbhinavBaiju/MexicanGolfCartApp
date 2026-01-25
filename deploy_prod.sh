@@ -54,7 +54,7 @@ npm run build
 
 echo "🚀 Uploading to Cloudflare Pages..."
 cd ../.. # Go back to root to run wrangler pages deploy
-npx wrangler pages deploy apps/admin/dist --project-name mexican-golf-cart-admin --branch master
+npx wrangler pages deploy apps/admin/dist --project-name mexican-golf-cart-admin --branch master --commit-dirty=true
 echo -e "${GREEN}✅ Admin Dashboard Deployed.${NC}"
 
 # 4. Shopify App (Extensions & Config)

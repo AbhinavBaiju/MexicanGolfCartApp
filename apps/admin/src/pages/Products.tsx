@@ -171,7 +171,7 @@ export default function Products() {
             <Checkbox
               label="Rentable"
               checked={Boolean(activeProduct?.rentable)}
-              onChange={(val) => setActiveProduct(prev => ({ ...prev, rentable: val ? 1 : 0 }))}
+              onChange={(val: boolean) => setActiveProduct(prev => ({ ...prev, rentable: val ? 1 : 0 }))}
             />
 
             <TextField

@@ -1,0 +1,11 @@
+# Extend the theme app extension check preset
+extends:
+  - theme-check:theme-app-extension
+
+# Disable JavaScript file size warning (suggested limit of 10KB is too restrictive for full widgets)
+AssetSizeAppBlockJavaScript:
+  enabled: false
+
+# Allow remote assets from trusted CDNs (Flatpickr, PDF.js)
+RemoteAsset:
+  enabled: false

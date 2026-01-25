@@ -94,6 +94,39 @@ export async function handleAdminRequest(request: Request, env: Env): Promise<Re
         }
     }
 
+    if (segments.length >= 2 && segments[0] === 'agreement') {
+        if (segments.length === 2 && segments[1] === 'current') {
+            if (method === 'GET') {
+                return handleAgreementCurrent(env, auth.shopDomain);
+            }
+        }
+        if (segments.length === 2 && segments[1] === 'upload') {
+            if (method === 'POST') {
+                return handleAgreementUpload(request, env, auth.shopDomain, auth.payload);
+            }
+        }
+        if (segments.length === 2 && segments[1] === 'placement') {
+            if (method === 'POST') {
+                return handleAgreementPlacement(request, env, auth.shopDomain);
+            }
+        }
+        if (segments.length === 2 && segments[1] === 'signed') {
+            if (method === 'GET') {
+                return handleAgreementSignedList(request, env, auth.shopDomain);
+            }
+        }
+        if (segments.length === 3 && segments[1] === 'signed') {
+            if (method === 'GET') {
+                return handleAgreementSignedDetail(env, auth.shopDomain, segments[2]);
+            }
+        }
+        if (segments.length === 3 && segments[1] === 'activate') {
+            if (method === 'POST') {
+                return handleAgreementActivate(env, auth.shopDomain, segments[2]);
+            }
+        }
+    }
+
     if (segments.length === 2 && segments[0] === 'bookings') {
         if (method === 'GET') {
             return handleBookingGet(env, auth.shopId, segments[1]);
@@ -748,6 +781,467 @@ async function handleShopifyProductsGet(env: Env, shopId: number): Promise<Respo
         console.error('Shopify fetch exception', e);
         return jsonError('Exception fetching products', 500);
     }
+}
+
+interface AgreementResponse {
+    id: string;
+    version: number;
+    active: boolean;
+    title: string | null;
+    pdf_url: string;
+    pdf_storage_type: string;
+    pdf_sha256: string | null;
+    page_number: number;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    created_at: string;
+    created_by: string | null;
+}
+
+interface SignedAgreementListItem {
+    id: string;
+    agreement_id: string;
+    agreement_version: number;
+    agreement_title: string | null;
+    cart_token: string;
+    order_id: string | null;
+    customer_email: string | null;
+    signed_at: string;
+    status: string;
+}
+
+interface SignedAgreementDetail extends SignedAgreementListItem {
+    signature_png_base64: string;
+}
+
+async function handleAgreementCurrent(env: Env, shopDomain: string): Promise<Response> {
+    const row = await env.DB.prepare(
+        `SELECT id, shop_domain, version, active, title, pdf_storage_type, pdf_storage_key, pdf_sha256,
+                page_number, x, y, width, height, created_at, created_by
+         FROM agreements
+         WHERE shop_domain = ? AND active = 1
+         ORDER BY version DESC
+         LIMIT 1`
+    )
+        .bind(shopDomain)
+        .first();
+
+    if (!row || !isRecord(row)) {
+        return Response.json({ ok: true, agreement: null });
+    }
+
+    const agreement = mapAgreementRow(row);
+    if (!agreement) {
+        return jsonError('Failed to read agreement', 500);
+    }
+
+    return Response.json({ ok: true, agreement });
+}
+
+async function handleAgreementUpload(
+    request: Request,
+    env: Env,
+    shopDomain: string,
+    payload: SessionTokenPayload
+): Promise<Response> {
+    const body = await readJsonBody(request);
+    if (!body) {
+        return jsonError('Invalid JSON body', 400);
+    }
+
+    const title = getOptionalString(body, 'title') ?? null;
+    const pdfUrl = getString(body, 'pdf_url');
+    const pdfSha = getOptionalString(body, 'pdf_sha256') ?? null;
+    const pdfType = getOptionalString(body, 'pdf_storage_type') ?? 'EXTERNAL';
+    const pageNumberRaw = getOptionalPositiveInt(body, 'page_number');
+    const xRaw = getOptionalNumber(body, 'x');
+    const yRaw = getOptionalNumber(body, 'y');
+    const widthRaw = getOptionalNumber(body, 'width');
+    const heightRaw = getOptionalNumber(body, 'height');
+
+    const pageNumber = pageNumberRaw ?? 1;
+    const x = xRaw ?? 0.1;
+    const y = yRaw ?? 0.8;
+    const width = widthRaw ?? 0.3;
+    const height = heightRaw ?? 0.1;
+
+    if (!pdfUrl || !isValidPdfUrl(pdfUrl)) {
+        return jsonError('Invalid pdf_url', 400);
+    }
+
+    if (isInvalidOptionalNumber(body, 'page_number', pageNumberRaw)) {
+        return jsonError('Invalid page_number', 400);
+    }
+    if (isInvalidOptionalNumber(body, 'x', xRaw)) {
+        return jsonError('Invalid x', 400);
+    }
+    if (isInvalidOptionalNumber(body, 'y', yRaw)) {
+        return jsonError('Invalid y', 400);
+    }
+    if (isInvalidOptionalNumber(body, 'width', widthRaw)) {
+        return jsonError('Invalid width', 400);
+    }
+    if (isInvalidOptionalNumber(body, 'height', heightRaw)) {
+        return jsonError('Invalid height', 400);
+    }
+    if (!isAllowedPdfStorageType(pdfType)) {
+        return jsonError('Invalid pdf_storage_type', 400);
+    }
+
+    if (!isNormalizedRect(x, y, width, height) || !Number.isInteger(pageNumber) || pageNumber < 1) {
+        return jsonError('Invalid signature placement', 400);
+    }
+
+    const versionRow = await env.DB.prepare(
+        'SELECT COALESCE(MAX(version), 0) as max_version FROM agreements WHERE shop_domain = ?'
+    )
+        .bind(shopDomain)
+        .first();
+    const maxVersion = isRecord(versionRow) ? toNumber(versionRow.max_version) ?? 0 : 0;
+    const nextVersion = maxVersion + 1;
+
+    const agreementId = crypto.randomUUID();
+    const createdBy = payload.sub ?? payload.sid ?? null;
+    const createdAt = new Date().toISOString();
+
+    try {
+        await env.DB.batch([
+            env.DB.prepare('UPDATE agreements SET active = 0 WHERE shop_domain = ?').bind(shopDomain),
+            env.DB.prepare(
+                `INSERT INTO agreements (
+                    id, shop_domain, version, active, title, pdf_storage_type, pdf_storage_key, pdf_sha256,
+                    page_number, x, y, width, height, created_at, created_by
+                )
+                VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            ).bind(
+                agreementId,
+                shopDomain,
+                nextVersion,
+                title,
+                pdfType,
+                pdfUrl,
+                pdfSha,
+                pageNumber,
+                x,
+                y,
+                width,
+                height,
+                createdAt,
+                createdBy
+            )
+        ]);
+    } catch (e) {
+        console.error('Agreement upload failed', e);
+        return jsonError('Failed to save agreement', 500);
+    }
+
+    return Response.json({
+        ok: true,
+        agreement: {
+            id: agreementId,
+            version: nextVersion,
+            active: true,
+            title,
+            pdf_url: pdfUrl,
+            pdf_storage_type: pdfType,
+            pdf_sha256: pdfSha,
+            page_number: pageNumber,
+            x,
+            y,
+            width,
+            height,
+            created_at: createdAt,
+            created_by: createdBy
+        }
+    });
+}
+
+async function handleAgreementPlacement(request: Request, env: Env, shopDomain: string): Promise<Response> {
+    const body = await readJsonBody(request);
+    if (!body) {
+        return jsonError('Invalid JSON body', 400);
+    }
+
+    const agreementId = getOptionalString(body, 'agreement_id');
+    const pageNumber = getOptionalPositiveInt(body, 'page_number');
+    const x = getOptionalNumber(body, 'x');
+    const y = getOptionalNumber(body, 'y');
+    const width = getOptionalNumber(body, 'width');
+    const height = getOptionalNumber(body, 'height');
+
+    if (
+        !pageNumber ||
+        x === undefined ||
+        y === undefined ||
+        width === undefined ||
+        height === undefined ||
+        !isNormalizedRect(x, y, width, height)
+    ) {
+        return jsonError('Invalid placement fields', 400);
+    }
+
+    const target = agreementId
+        ? await env.DB.prepare(
+            'SELECT id FROM agreements WHERE shop_domain = ? AND id = ?'
+        ).bind(shopDomain, agreementId).first()
+        : await env.DB.prepare(
+            'SELECT id FROM agreements WHERE shop_domain = ? AND active = 1 ORDER BY version DESC LIMIT 1'
+        ).bind(shopDomain).first();
+
+    if (!target || !isRecord(target)) {
+        return jsonError('Agreement not found', 404);
+    }
+
+    await env.DB.prepare(
+        `UPDATE agreements
+         SET page_number = ?, x = ?, y = ?, width = ?, height = ?
+         WHERE shop_domain = ? AND id = ?`
+    )
+        .bind(pageNumber, x, y, width, height, shopDomain, target.id)
+        .run();
+
+    return Response.json({ ok: true });
+}
+
+async function handleAgreementSignedList(request: Request, env: Env, shopDomain: string): Promise<Response> {
+    const url = new URL(request.url);
+    const status = url.searchParams.get('status');
+    const orderId = url.searchParams.get('order_id');
+    const email = url.searchParams.get('email');
+    const startDate = url.searchParams.get('start_date');
+    const endDate = url.searchParams.get('end_date');
+    const limit = clampInt(url.searchParams.get('limit'), 25, 1, 100);
+    const offset = clampInt(url.searchParams.get('offset'), 0, 0, 10_000);
+
+    let sql =
+        `SELECT s.id, s.agreement_id, s.cart_token, s.order_id, s.customer_email, s.signed_at, s.status,
+                a.version as agreement_version, a.title as agreement_title
+         FROM signed_agreements s
+         JOIN agreements a ON s.agreement_id = a.id
+         WHERE s.shop_domain = ?`;
+    const bindings: (string | number)[] = [shopDomain];
+
+    if (status) {
+        sql += ' AND s.status = ?';
+        bindings.push(status);
+    }
+    if (orderId) {
+        sql += ' AND s.order_id = ?';
+        bindings.push(orderId);
+    }
+    if (email) {
+        sql += ' AND s.customer_email LIKE ?';
+        bindings.push(`%${email}%`);
+    }
+    if (startDate) {
+        sql += ' AND date(s.signed_at) >= date(?)';
+        bindings.push(startDate);
+    }
+    if (endDate) {
+        sql += ' AND date(s.signed_at) <= date(?)';
+        bindings.push(endDate);
+    }
+
+    sql += ' ORDER BY s.signed_at DESC LIMIT ? OFFSET ?';
+    bindings.push(limit, offset);
+
+    const rows = await env.DB.prepare(sql).bind(...bindings).all();
+    const items = (rows.results ?? [])
+        .filter(isRecord)
+        .map((row) => ({
+            id: readStringField(row, 'id') ?? '',
+            agreement_id: readStringField(row, 'agreement_id') ?? '',
+            agreement_version: toNumber(row.agreement_version) ?? 0,
+            agreement_title: readStringField(row, 'agreement_title'),
+            cart_token: readStringField(row, 'cart_token') ?? '',
+            order_id: readStringField(row, 'order_id'),
+            customer_email: readStringField(row, 'customer_email'),
+            signed_at: readStringField(row, 'signed_at') ?? '',
+            status: readStringField(row, 'status') ?? 'pending'
+        }))
+        .filter((item) => item.id && item.agreement_id);
+
+    return Response.json({ ok: true, signed_agreements: items });
+}
+
+async function handleAgreementSignedDetail(env: Env, shopDomain: string, signedId: string): Promise<Response> {
+    const row = await env.DB.prepare(
+        `SELECT s.id, s.agreement_id, s.cart_token, s.order_id, s.customer_email, s.signed_at, s.status,
+                s.signature_png_base64,
+                a.version as agreement_version, a.title as agreement_title
+         FROM signed_agreements s
+         JOIN agreements a ON s.agreement_id = a.id
+         WHERE s.shop_domain = ? AND s.id = ?`
+    )
+        .bind(shopDomain, signedId)
+        .first();
+
+    if (!row || !isRecord(row)) {
+        return jsonError('Signed agreement not found', 404);
+    }
+
+    const detail: SignedAgreementDetail = {
+        id: readStringField(row, 'id') ?? '',
+        agreement_id: readStringField(row, 'agreement_id') ?? '',
+        agreement_version: toNumber(row.agreement_version) ?? 0,
+        agreement_title: readStringField(row, 'agreement_title'),
+        cart_token: readStringField(row, 'cart_token') ?? '',
+        order_id: readStringField(row, 'order_id'),
+        customer_email: readStringField(row, 'customer_email'),
+        signed_at: readStringField(row, 'signed_at') ?? '',
+        status: readStringField(row, 'status') ?? 'pending',
+        signature_png_base64: readStringField(row, 'signature_png_base64') ?? ''
+    };
+
+    if (!detail.id || !detail.signature_png_base64) {
+        return jsonError('Signed agreement data missing', 500);
+    }
+
+    return Response.json({ ok: true, signed_agreement: detail });
+}
+
+async function handleAgreementActivate(env: Env, shopDomain: string, agreementId: string): Promise<Response> {
+    const exists = await env.DB.prepare(
+        'SELECT id FROM agreements WHERE shop_domain = ? AND id = ?'
+    ).bind(shopDomain, agreementId).first();
+
+    if (!exists) {
+        return jsonError('Agreement not found', 404);
+    }
+
+    await env.DB.batch([
+        env.DB.prepare('UPDATE agreements SET active = 0 WHERE shop_domain = ?').bind(shopDomain),
+        env.DB.prepare('UPDATE agreements SET active = 1 WHERE shop_domain = ? AND id = ?').bind(shopDomain, agreementId)
+    ]);
+
+    return Response.json({ ok: true });
+}
+
+function mapAgreementRow(row: Record<string, unknown>): AgreementResponse | null {
+    const id = readStringField(row, 'id');
+    const pdfStorageKey = readStringField(row, 'pdf_storage_key');
+    const pdfStorageType = readStringField(row, 'pdf_storage_type');
+    if (!id || !pdfStorageKey || !pdfStorageType) {
+        return null;
+    }
+
+    const version = toNumber(row.version);
+    const pageNumber = toNumber(row.page_number);
+    const x = toNumber(row.x);
+    const y = toNumber(row.y);
+    const width = toNumber(row.width);
+    const height = toNumber(row.height);
+
+    if (
+        version === null ||
+        pageNumber === null ||
+        x === null ||
+        y === null ||
+        width === null ||
+        height === null
+    ) {
+        return null;
+    }
+
+    return {
+        id,
+        version,
+        active: Boolean(toNumber(row.active)),
+        title: readStringField(row, 'title'),
+        pdf_url: pdfStorageKey,
+        pdf_storage_type: pdfStorageType,
+        pdf_sha256: readStringField(row, 'pdf_sha256'),
+        page_number: pageNumber,
+        x,
+        y,
+        width,
+        height,
+        created_at: readStringField(row, 'created_at') ?? '',
+        created_by: readStringField(row, 'created_by')
+    };
+}
+
+function isNormalizedRect(x: number, y: number, width: number, height: number): boolean {
+    if (!isFiniteNumber(x) || !isFiniteNumber(y) || !isFiniteNumber(width) || !isFiniteNumber(height)) {
+        return false;
+    }
+    if (width <= 0 || height <= 0) {
+        return false;
+    }
+    return x >= 0 && y >= 0 && width <= 1 && height <= 1 && x + width <= 1 && y + height <= 1;
+}
+
+function isFiniteNumber(value: number): boolean {
+    return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isValidPdfUrl(value: string): boolean {
+    try {
+        const parsed = new URL(value);
+        return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+    } catch {
+        return false;
+    }
+}
+
+function isAllowedPdfStorageType(value: string): boolean {
+    return value === 'EXTERNAL' || value === 'SHOPIFY_FILES';
+}
+
+function isInvalidOptionalNumber(
+    record: Record<string, unknown>,
+    key: string,
+    parsed: number | undefined
+): boolean {
+    return key in record && parsed === undefined;
+}
+
+function clampInt(value: string | null, fallback: number, min: number, max: number): number {
+    if (!value) {
+        return fallback;
+    }
+    const parsed = Number(value);
+    if (!Number.isInteger(parsed)) {
+        return fallback;
+    }
+    return Math.min(max, Math.max(min, parsed));
+}
+
+function readStringField(row: Record<string, unknown>, key: string): string | null {
+    const value = row[key];
+    if (typeof value === 'string') {
+        return value;
+    }
+    if (typeof value === 'number') {
+        return value.toString();
+    }
+    return null;
+}
+
+function toNumber(value: unknown): number | null {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return value;
+    }
+    if (typeof value === 'string' && value.trim() !== '') {
+        const parsed = Number(value);
+        if (Number.isFinite(parsed)) {
+            return parsed;
+        }
+    }
+    return null;
+}
+
+function getOptionalPositiveInt(record: Record<string, unknown>, key: string): number | undefined {
+    if (!(key in record)) {
+        return undefined;
+    }
+    const value = record[key];
+    if (typeof value === 'number' && Number.isInteger(value) && value > 0) {
+        return value;
+    }
+    return undefined;
 }
 
 function rateLimitKey(request: Request, scope: string): string {

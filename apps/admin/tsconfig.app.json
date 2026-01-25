@@ -26,9 +26,13 @@
     "noUnusedParameters": true,
     "erasableSyntaxOnly": false,
     "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true
+    "noUncheckedSideEffectImports": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "preserveSymlinks": true
   },
   "include": [
     "src"
-  ]
+  ],
+  "exclude": ["node_modules", "dist", "build"]
 }

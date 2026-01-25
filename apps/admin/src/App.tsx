@@ -9,6 +9,7 @@ import Dashboard from './pages/Dashboard';
 import Bookings from './pages/Bookings';
 import Inventory from './pages/Inventory';
 import Locations from './pages/Locations';
+import Agreement from './pages/Agreement';
 
 function AppContent() {
   return (
@@ -18,12 +19,14 @@ function AppContent() {
         <a href="/bookings">Bookings</a>
         <a href="/inventory">Inventory</a>
         <a href="/locations">Locations</a>
+        <a href="/agreement">Agreement</a>
       </NavMenu>
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/bookings" element={<Bookings />} />
         <Route path="/inventory" element={<Inventory />} />
         <Route path="/locations" element={<Locations />} />
+        <Route path="/agreement" element={<Agreement />} />
       </Routes>
     </Frame>
   );

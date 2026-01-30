@@ -1,4 +1,4 @@
-import { BlockStack, Text, InlineError, InlineStack, Spinner, Badge, Button, Modal } from '@shopify/polaris';
+import { BlockStack, Text, InlineError, InlineStack, Spinner, Badge, Button, Modal, InlineGrid, Box } from '@shopify/polaris';
 import { ViewIcon } from '@shopify/polaris-icons';
 import { useState } from 'react';
 import { useAuthenticatedFetch } from '../api';
@@ -227,7 +227,7 @@ export function BookingCard({ booking, onMarkComplete }: BookingCardProps) {
             <Modal
                 open={agreementModalOpen}
                 onClose={() => setAgreementModalOpen(false)}
-                title="Signed agreement"
+                title="Signed Agreement"
                 size="fullScreen"
             >
                 <Modal.Section>
@@ -240,11 +240,27 @@ export function BookingCard({ booking, onMarkComplete }: BookingCardProps) {
                                 <Text as="span">Loading agreement…</Text>
                             </InlineStack>
                         ) : signedAgreement && agreementDoc ? (
-                            <BlockStack gap="200">
-                                <Text as="p">Signed at {signedAgreement.signed_at}</Text>
-                                <Text as="p">Order ID: {signedAgreement.order_id || 'N/A'}</Text>
-                                <Text as="p">Email: {signedAgreement.customer_email || 'N/A'}</Text>
-                                <Text as="p">Agreement v{signedAgreement.agreement_version}</Text>
+                            <BlockStack gap="400">
+                                <Box padding="400" background="bg-surface-secondary" borderRadius="200">
+                                    <InlineGrid columns={{ xs: 1, sm: 2, md: 4 }} gap="400">
+                                        <BlockStack gap="100">
+                                            <Text as="p" variant="headingXs" tone="subdued">Signed At</Text>
+                                            <Text as="p" variant="bodyMd">{new Date(signedAgreement.signed_at).toLocaleString()}</Text>
+                                        </BlockStack>
+                                        <BlockStack gap="100">
+                                            <Text as="p" variant="headingXs" tone="subdued">Order ID</Text>
+                                            <Text as="p" variant="bodyMd">{signedAgreement.order_id || 'N/A'}</Text>
+                                        </BlockStack>
+                                        <BlockStack gap="100">
+                                            <Text as="p" variant="headingXs" tone="subdued">Email</Text>
+                                            <Text as="p" variant="bodyMd" breakWord>{signedAgreement.customer_email || 'N/A'}</Text>
+                                        </BlockStack>
+                                        <BlockStack gap="100">
+                                            <Text as="p" variant="headingXs" tone="subdued">Version</Text>
+                                            <Text as="p" variant="bodyMd">v{signedAgreement.agreement_version}</Text>
+                                        </BlockStack>
+                                    </InlineGrid>
+                                </Box>
 
                                 {signedAgreement.signature_png_base64 ? (
                                     <SignedAgreementPdfPreview

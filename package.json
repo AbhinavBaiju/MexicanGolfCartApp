@@ -15,7 +15,8 @@
         "test": "echo \"Error: no test specified\" && exit 1"
     },
     "devDependencies": {
-        "concurrently": "^8.0.0"
+        "concurrently": "^8.0.0",
+        "wrangler": "^4.60.0"
     },
     "overrides": {
         "@types/react": "^18.2.0",

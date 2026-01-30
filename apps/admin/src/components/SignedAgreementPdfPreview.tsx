@@ -1,4 +1,5 @@
 import { BlockStack, Box, Button, InlineError, InlineStack, Spinner, Text } from '@shopify/polaris';
+import { SaveIcon } from '@shopify/polaris-icons';
 import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist';
 import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
@@ -346,6 +347,13 @@ export function SignedAgreementPdfPreview({
     <BlockStack gap="400">
       <InlineStack gap="200">
         <Button
+          icon={SaveIcon}
+          onClick={() => window.open(pdfUrl, '_blank')}
+        >
+          Download Original PDF
+        </Button>
+        <Button
+          icon={SaveIcon}
           onClick={handleDownloadSignedPage}
           loading={downloading}
           disabled={!pageSizes[signaturePageNumber] || !signatureDataUrl}

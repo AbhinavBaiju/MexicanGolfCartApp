@@ -1,0 +1,28 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Run production deploy script",
+			"type": "shell",
+			"command": "bash",
+			"args": [
+				"/Users/abhinav/Documents/MexicanGolfCartApp/deploy_prod.sh"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Refresh lockfile with npm install",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"install",
+				"--prefer-offline"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		}
+	]
+}

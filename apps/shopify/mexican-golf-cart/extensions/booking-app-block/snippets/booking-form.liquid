@@ -1,0 +1,81 @@
+{% comment %}
+  Reusable Booking Form Snippet
+  Renders the date picker form for the booking widget
+  
+  Required variables:
+    - booking_product: The product object to book
+    - button_text: Text for the submit button
+{% endcomment %}
+
+<form class="booking-form" data-booking-form>
+  <div class="booking-form__dates">
+    <div class="booking-form__date-group">
+      <label for="booking-pickup-{{ booking_product.id }}" class="booking-form__label">
+        {{ 'booking_widget.pickup_date' | t }}
+      </label>
+      <div class="booking-form__input-wrapper">
+        <svg class="booking-form__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+          <line x1="16" y1="2" x2="16" y2="6"></line>
+          <line x1="8" y1="2" x2="8" y2="6"></line>
+          <line x1="3" y1="10" x2="21" y2="10"></line>
+        </svg>
+        <input 
+          type="date" 
+          id="booking-pickup-{{ booking_product.id }}" 
+          name="pickup_date" 
+          class="booking-form__input" 
+          required 
+          data-pickup-date
+        >
+      </div>
+    </div>
+    
+    <div class="booking-form__date-group">
+      <label for="booking-return-{{ booking_product.id }}" class="booking-form__label">
+        {{ 'booking_widget.return_date' | t }}
+      </label>
+      <div class="booking-form__input-wrapper">
+        <svg class="booking-form__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+          <line x1="16" y1="2" x2="16" y2="6"></line>
+          <line x1="8" y1="2" x2="8" y2="6"></line>
+          <line x1="3" y1="10" x2="21" y2="10"></line>
+        </svg>
+        <input 
+          type="date" 
+          id="booking-return-{{ booking_product.id }}" 
+          name="return_date" 
+          class="booking-form__input" 
+          required 
+          data-return-date
+        >
+      </div>
+    </div>
+  </div>
+  
+  <div class="booking-form__summary" data-booking-summary style="display: none;">
+    <div class="booking-form__summary-row">
+      <span class="booking-form__nights" data-nights-count>0 nights</span>
+      <span class="booking-form__rate" data-price-per-night></span>
+    </div>
+    <div class="booking-form__summary-row booking-form__summary-row--total">
+      <span class="booking-form__total-label">Total</span>
+      <span class="booking-form__total-price" data-total-price>$0.00</span>
+    </div>
+  </div>
+  
+  <div class="booking-form__status" data-status-message></div>
+  
+  <div class="booking-form__timer" data-timer-container style="display: none;">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"></circle>
+      <polyline points="12 6 12 12 16 14"></polyline>
+    </svg>
+    <span data-timer-text>Held for 20:00</span>
+  </div>
+  
+  <button type="submit" class="booking-form__submit" data-submit-btn disabled>
+    {{ button_text | default: 'Check Availability' }}
+  </button>
+</form>

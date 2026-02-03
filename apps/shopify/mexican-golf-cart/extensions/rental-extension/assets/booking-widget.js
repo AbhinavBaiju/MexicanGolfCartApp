@@ -14,9 +14,9 @@ document.addEventListener('DOMContentLoaded', () => {
     ];
 
     const STATIC_PRODUCTS = [
-        { title: 'Golf Cart', product_id: 7841859010662, variant_id: null },
-        { title: 'Polaris Ranger', product_id: 7841859141734, variant_id: null },
-        { title: "6' Soft Top Longboard", product_id: 7841859240038, variant_id: 44340215840870 }
+        { title: 'Golf Cart', product_id: 7841859010662, variant_id: null, image_url: null, image_alt: null },
+        { title: 'Polaris Ranger', product_id: 7841859141734, variant_id: null, image_url: null, image_alt: null },
+        { title: "6' Soft Top Longboard", product_id: 7841859240038, variant_id: 44340215840870, image_url: null, image_alt: null }
     ];
 
     // Configuration
@@ -48,6 +48,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let productId = form.dataset.productId;
         let variantId = form.dataset.variantId;
 
+        let visibleProducts = [];
         let debounceTimer = null;
         let countdownInterval = null;
         let currentBookingToken = null;
@@ -62,6 +63,11 @@ document.addEventListener('DOMContentLoaded', () => {
             // Select new elements
             elements.toggleContainer = form.querySelector('.gc-product-toggle-container');
             elements.toggle = form.querySelector('.gc-product-toggle');
+            elements.toggleSelect = form.querySelector('.gc-product-toggle-select');
+            const grid = form.closest('.gc-grid-container');
+            elements.productImageContainer = grid ? grid.querySelector('[data-gc-product-image-container]') : null;
+            elements.productImage = elements.productImageContainer ? elements.productImageContainer.querySelector('[data-gc-product-image]') : null;
+            elements.productImagePlaceholder = elements.productImageContainer ? elements.productImageContainer.querySelector('[data-gc-product-image-placeholder]') : null;
 
             initDatePickers();
             initStaticConfig();  // Instant UI setup with hardcoded data
@@ -70,6 +76,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Release on abandon
             window.addEventListener('pagehide', handleAbandon);
+
+            if (elements.toggleSelect) {
+                elements.toggleSelect.addEventListener('change', () => {
+                    const nextId = String(elements.toggleSelect.value || '');
+                    const nextProd = visibleProducts.find(p => String(p.product_id) === nextId);
+                    if (!nextProd) return;
+                    selectProduct(nextProd);
+                });
+            }
         }
 
         // Initialize Flatpickr date pickers with range selection
@@ -137,11 +152,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await res.json();
                 const products = data.products || [];
 
-                // Update STATIC_PRODUCTS with fetched variant_ids
+                // Update STATIC_PRODUCTS with fetched variant_ids + images (if available)
                 products.forEach(serverProd => {
                     const staticProd = STATIC_PRODUCTS.find(p => p.product_id === serverProd.product_id);
                     if (staticProd && serverProd.variant_id) {
                         staticProd.variant_id = serverProd.variant_id;
+                    }
+                    if (staticProd && serverProd.image_url) {
+                        staticProd.image_url = serverProd.image_url;
+                        staticProd.image_alt = serverProd.image_alt || null;
                     }
                 });
 
@@ -150,9 +169,34 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (currentProd && currentProd.variant_id) {
                     variantId = currentProd.variant_id;
                 }
+                if (currentProd) {
+                    renderProductImage(currentProd);
+                }
             } catch (err) {
                 console.warn('Background variant fetch failed:', err);
                 // Widget still functional - just variant_ids may be incomplete
+            }
+        }
+
+        function renderProductImage(prod) {
+            if (!elements.productImageContainer || !elements.productImage) return;
+
+            const url = prod && prod.image_url ? String(prod.image_url) : '';
+            const title = prod && prod.title ? String(prod.title) : 'Product';
+            const alt = prod && prod.image_alt ? String(prod.image_alt) : `Rental – ${title}`;
+
+            if (url) {
+                elements.productImage.src = url;
+                elements.productImage.alt = alt;
+                elements.productImage.style.display = 'block';
+                if (elements.productImagePlaceholder) elements.productImagePlaceholder.style.display = 'none';
+                elements.productImageContainer.classList.add('gc-product-image--has-image');
+            } else {
+                elements.productImage.removeAttribute('src');
+                elements.productImage.alt = '';
+                elements.productImage.style.display = 'none';
+                if (elements.productImagePlaceholder) elements.productImagePlaceholder.style.display = 'flex';
+                elements.productImageContainer.classList.remove('gc-product-image--has-image');
             }
         }
 
@@ -161,9 +205,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Enforce limit of 3 products
             const products = sourceProducts.slice(0, 3);
+            visibleProducts = products;
 
             elements.toggleContainer.style.display = 'block';
             elements.toggle.innerHTML = '';
+
+            if (elements.toggleSelect) {
+                elements.toggleSelect.innerHTML = '';
+                products.forEach((prod) => {
+                    const opt = document.createElement('option');
+                    opt.value = String(prod.product_id);
+                    opt.textContent = prod.title || `Product ${prod.product_id}`;
+                    elements.toggleSelect.appendChild(opt);
+                });
+            }
 
             // Determine initial selection from the VISIBLE products
             let targetProd = products[0];
@@ -179,6 +234,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const btn = document.createElement('button');
                 btn.type = 'button';
                 btn.className = 'gc-toggle-option';
+                btn.dataset.productId = String(prod.product_id);
                 btn.textContent = prod.title || `Product ${prod.product_id}`;
 
                 btn.onclick = () => {
@@ -204,8 +260,17 @@ document.addEventListener('DOMContentLoaded', () => {
             // UI Update
             const all = elements.toggle.querySelectorAll('.gc-toggle-option');
             all.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
+            const targetBtn = btn || elements.toggle.querySelector(`.gc-toggle-option[data-product-id="${String(prod.product_id)}"]`);
+            if (targetBtn) targetBtn.classList.add('active');
 
+            if (elements.toggleSelect) {
+                const nextValue = String(prod.product_id);
+                if (String(elements.toggleSelect.value) !== nextValue) {
+                    elements.toggleSelect.value = nextValue;
+                }
+            }
+
+            renderProductImage(prod);
             debouncedCheckAvailability();
         }
 

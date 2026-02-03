@@ -46,6 +46,11 @@
   box-sizing: border-box;
 }
 
+.booking-container,
+.booking-container * {
+  box-sizing: border-box;
+}
+
 .mgc-white-card__title {
   margin: 0 0 24px 0;
   font-size: 28px;
@@ -127,18 +132,88 @@
 @media (min-width: 992px) {
   .gc-grid-container {
     grid-template-columns: 1fr 1fr;
+    align-items: stretch;
   }
 }
 
 .gc-grid-col-left {
-  /* Empty column */
   min-height: 200px;
-  /* Placeholder height */
 }
 
 .gc-grid-col-right {
   display: flex;
   flex-direction: column;
+}
+
+/* ============================================
+   PRODUCT IMAGE (Left Column)
+   ============================================ */
+
+.gc-product-image-container {
+  width: 100%;
+  height: 220px;
+  border-radius: 24px;
+  overflow: hidden;
+  position: relative;
+  border: 1px solid #f0f0f0;
+  background: linear-gradient(135deg, #fafafa 0%, #f3f3f3 100%);
+}
+
+@media (min-width: 768px) {
+  .gc-product-image-container {
+    height: 320px;
+  }
+}
+
+@media (min-width: 992px) {
+  .gc-grid-col-left {
+    display: flex;
+  }
+
+  .gc-product-image-container {
+    height: 100%;
+    min-height: 420px;
+  }
+}
+
+.gc-product-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.gc-product-image-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(11, 11, 11, 0.5);
+  background: transparent;
+  text-align: center;
+  padding: 18px;
+}
+
+.gc-product-image-placeholder-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.gc-product-image-placeholder-icon {
+  color: rgba(11, 11, 11, 0.35);
+}
+
+.gc-product-image-placeholder-text {
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.gc-product-image--has-image .gc-product-image-placeholder {
+  display: none;
 }
 
 /* ============================================
@@ -173,6 +248,7 @@
   position: relative;
   display: flex;
   align-items: center;
+  min-width: 0;
 }
 
 .gc-input-icon {
@@ -231,6 +307,9 @@
 .gc-fulfillment-options {
   display: flex;
   gap: 12px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .gc-radio-label {
@@ -244,6 +323,9 @@
   border-radius: var(--gc-radius-input);
   cursor: pointer;
   transition: all 0.2s ease;
+  min-width: 0;
+  max-width: 100%;
+  outline: none;
 }
 
 .gc-radio-label:hover {
@@ -253,12 +335,14 @@
 .gc-radio-label:has(input:checked) {
   border-color: var(--gc-color-focus-ring);
   background-color: rgba(0, 122, 255, 0.05);
-  box-shadow: 0 0 0 1px var(--gc-color-focus-ring);
+  /* Inset ring prevents “bleeding” outside the card on narrow screens */
+  box-shadow: inset 0 0 0 1px var(--gc-color-focus-ring);
 }
 
 .gc-radio-text {
   font-weight: 500;
   color: var(--gc-color-text-input);
+  min-width: 0;
 }
 
 .gc-dynamic-details {
@@ -269,24 +353,30 @@
 /* Pickup Display - Matches Delivery Input Box styling */
 .gc-pickup-display {
   width: 100%;
-  height: 56px;
-  padding: 0 16px 0 48px;
+  min-height: 56px;
+  padding: 14px 16px 14px 48px;
   background-color: var(--gc-color-input-bg);
   border: 1px solid var(--gc-color-border);
   border-radius: var(--gc-radius-input);
   display: flex;
   align-items: center;
   box-sizing: border-box;
+  min-width: 0;
 }
 
 .gc-pickup-display .gc-address-text {
   font-size: 16px;
   color: var(--gc-color-text-input);
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.2;
 }
 
 @media (max-width: 560px) {
   .gc-pickup-display {
-    height: 52px;
+    min-height: 52px;
+    padding-top: 12px;
+    padding-bottom: 12px;
   }
 }
 
@@ -1182,6 +1272,15 @@
   gap: 4px;
 }
 
+.gc-product-toggle-select-wrapper {
+  display: none;
+  width: 100%;
+}
+
+.gc-product-toggle-select {
+  padding-left: 16px;
+}
+
 .gc-toggle-option {
   flex: 1;
   border: none;
@@ -1209,6 +1308,37 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
+/* Mobile: use a dropdown for product selection (keep pills unchanged on tablet+) */
+@media (max-width: 640px) {
+  .gc-product-toggle {
+    display: none;
+  }
+
+  .gc-product-toggle-select-wrapper {
+    display: block;
+  }
+
+  .gc-product-toggle-select {
+    height: 52px;
+    background-color: #FFFFFF;
+    border-color: var(--gc-color-border);
+    border-radius: 999px;
+    padding-right: 44px;
+    font-size: 15px;
+    font-weight: 800;
+    color: var(--gc-color-primary);
+  }
+
+  .gc-product-toggle-select:focus {
+    border-color: var(--gc-color-primary);
+    box-shadow: 0 0 0 3px rgba(0, 99, 65, 0.15);
+  }
+
+  .gc-product-toggle-select-wrapper .gc-select-chevron {
+    color: var(--gc-color-primary);
+  }
+}
+
 @media (max-width: 560px) {
   .gc-product-toggle {
     height: 52px;
@@ -1216,5 +1346,112 @@
 
   .gc-toggle-option {
     font-size: 13px;
+  }
+}
+
+/* Narrow mobile: optimize for <= 420px (kept at end to override earlier rules) */
+@media (max-width: 420px) {
+  /* Form layout */
+  .gc-date-range {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .gc-form-row.gc-location-quantity-row {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  /* Product toggle: wrap pills instead of truncating */
+  .gc-product-toggle {
+    height: auto;
+    border-radius: 16px;
+    flex-wrap: wrap;
+    padding: 6px;
+  }
+
+  .gc-toggle-option {
+    flex: 1 1 calc(50% - 4px);
+    height: 44px;
+    padding: 0 12px;
+    white-space: normal;
+    line-height: 1.1;
+  }
+
+  .gc-toggle-option:last-child:nth-child(odd) {
+    flex-basis: 100%;
+  }
+
+  .gc-fulfillment-options {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .gc-radio-label {
+    flex: 0 0 auto;
+    width: 100%;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 14px;
+  }
+
+  .gc-radio-text {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.25;
+  }
+
+  /* Recover a bit of horizontal space in inputs */
+  .gc-input-icon {
+    left: 14px;
+  }
+
+  .gc-input,
+  .gc-select {
+    padding-left: 44px;
+  }
+
+  .gc-pickup-display {
+    padding-left: 44px;
+  }
+
+  /* Flatpickr: prevent horizontal overflow on small screens */
+  .flatpickr-calendar.open {
+    width: calc(100vw - 24px) !important;
+    max-width: calc(100vw - 24px) !important;
+  }
+
+  .flatpickr-months {
+    padding: 16px 12px 12px 12px !important;
+  }
+
+  .flatpickr-innerContainer {
+    padding: 0 12px 12px 12px !important;
+  }
+
+  .dayContainer {
+    min-width: 0 !important;
+  }
+
+  .flatpickr-weekday {
+    font-size: 12px !important;
+  }
+
+  .flatpickr-day {
+    width: 36px !important;
+    height: 36px !important;
+    line-height: 36px !important;
+    max-width: 36px !important;
+    font-size: 13px !important;
+  }
+
+  .flatpickr-day:hover:not(.flatpickr-disabled):not(.prevMonthDay):not(.nextMonthDay) {
+    line-height: 32px !important;
+  }
+
+  .flatpickr-day.selected:hover,
+  .flatpickr-day.startRange:hover,
+  .flatpickr-day.endRange:hover {
+    line-height: 36px !important;
   }
 }

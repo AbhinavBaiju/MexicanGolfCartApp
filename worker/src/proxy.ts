@@ -492,6 +492,16 @@ async function handleConfig(env: Env, shopDomain: string): Promise<Response> {
                 ... on Product {
                   id
                   title
+                  featuredImage {
+                    url
+                    altText
+                  }
+                  images(first: 1) {
+                    nodes {
+                      url
+                      altText
+                    }
+                  }
                 }
               }
             }
@@ -511,21 +521,56 @@ async function handleConfig(env: Env, shopDomain: string): Promise<Response> {
                 });
 
                 if (shopifyRes.ok) {
-                    const shopifyData = await shopifyRes.json() as any;
-                    const nodes = shopifyData.data?.nodes || [];
+                    const shopifyData = await shopifyRes.json() as unknown;
+                    const nodes = isRecord(shopifyData) && isRecord(shopifyData.data) && Array.isArray(shopifyData.data.nodes)
+                        ? shopifyData.data.nodes
+                        : [];
 
-                    // Create map of ID -> Title
                     const titleMap = new Map<number, string>();
-                    nodes.forEach((node: any) => {
-                        if (node && node.id) {
-                            const id = parseInt(node.id.split('/').pop() || '0');
-                            titleMap.set(id, node.title);
+                    const imageMap = new Map<number, { url: string; altText: string | null }>();
+
+                    nodes.forEach((node) => {
+                        if (!isRecord(node)) return;
+                        const idValue = node.id;
+                        const titleValue = node.title;
+                        if (typeof idValue !== 'string') return;
+
+                        const id = parseInt(idValue.split('/').pop() || '0');
+                        if (!Number.isFinite(id) || id <= 0) return;
+
+                        if (typeof titleValue === 'string' && titleValue.trim().length > 0) {
+                            titleMap.set(id, titleValue);
+                        }
+
+                        const images = node.images;
+                        const featuredImage = node.featuredImage;
+                        if (isRecord(featuredImage) && typeof featuredImage.url === 'string' && featuredImage.url.trim().length > 0) {
+                            imageMap.set(id, {
+                                url: featuredImage.url,
+                                altText: typeof featuredImage.altText === 'string' ? featuredImage.altText : null,
+                            });
+                            return;
+                        }
+
+                        if (isRecord(images) && Array.isArray(images.nodes) && images.nodes.length > 0) {
+                            const first = images.nodes[0];
+                            if (isRecord(first) && typeof first.url === 'string' && first.url.trim().length > 0) {
+                                imageMap.set(id, {
+                                    url: first.url,
+                                    altText: typeof first.altText === 'string' ? first.altText : null,
+                                });
+                            }
                         }
                     });
 
-                    // Merge titles into products
+                    // Merge titles/images into products
                     products.forEach((p: any) => {
-                        p.title = titleMap.get(p.product_id) || `Product ${p.product_id}`;
+                        p.title = titleMap.get(p.product_id) || p.title || `Product ${p.product_id}`;
+                        const img = imageMap.get(p.product_id);
+                        if (img) {
+                            p.image_url = img.url;
+                            p.image_alt = img.altText;
+                        }
                     });
                 } else {
                     console.error('Failed to fetch Shopify products', await shopifyRes.text());

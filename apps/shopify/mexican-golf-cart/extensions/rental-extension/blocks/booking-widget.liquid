@@ -16,14 +16,26 @@
 
         {% assign booking_product = block.settings.product | default: product %}
         
-        <div class="gc-grid-container">
-            <div class="gc-grid-col-left">
-                <!-- Left Column Empty -->
-            </div>
-            <div class="gc-grid-col-right">
-                <form class="gc-booking-form" data-product-id="{{ booking_product.id }}" data-variant-id="{{ booking_product.selected_or_first_available_variant.id }}">
-                
-                <div class="gc-form-grid">
+	        <div class="gc-grid-container">
+	            <div class="gc-grid-col-left">
+	                <div class="gc-product-image-container" data-gc-product-image-container>
+	                  <img class="gc-product-image" data-gc-product-image alt="" loading="lazy" decoding="async" style="display: none;">
+	                  <div class="gc-product-image-placeholder" data-gc-product-image-placeholder>
+	                    <div class="gc-product-image-placeholder-inner">
+	                      <svg class="gc-product-image-placeholder-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+	                        <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v11A2.5 2.5 0 0 1 17.5 20h-11A2.5 2.5 0 0 1 4 17.5v-11Z" stroke="currentColor" stroke-width="1.5"/>
+	                        <path d="M8 10.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" stroke="currentColor" stroke-width="1.5"/>
+	                        <path d="M4.5 17l5.2-5.2a1.2 1.2 0 0 1 1.7 0L14 14.4l1.2-1.2a1.2 1.2 0 0 1 1.7 0L19.5 16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+	                      </svg>
+	                      <span class="gc-product-image-placeholder-text">Image coming soon</span>
+	                    </div>
+	                  </div>
+	                </div>
+	            </div>
+	            <div class="gc-grid-col-right">
+	                <form class="gc-booking-form" data-product-id="{{ booking_product.id }}" data-variant-id="{{ booking_product.selected_or_first_available_variant.id }}">
+	                
+	                <div class="gc-form-grid">
                     
                     <!-- Countdown Timer -->
                     <div id="gc-timer-container" style="display: none;">
@@ -38,6 +50,14 @@
                     <div class="gc-product-toggle-container" style="display: none;">
                         <div class="gc-product-toggle">
                             <!-- Pills injected by JS -->
+                        </div>
+                        <div class="gc-product-toggle-select-wrapper gc-select-wrapper">
+                          <select class="gc-product-toggle-select gc-select" aria-label="Select a rentable product"></select>
+                          <div class="gc-select-chevron">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                              <polyline points="6 9 12 15 18 9"></polyline>
+                            </svg>
+                          </div>
                         </div>
                     </div>
 

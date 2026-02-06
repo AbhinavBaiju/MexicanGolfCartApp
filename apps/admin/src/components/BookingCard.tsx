@@ -14,8 +14,14 @@ export interface Booking {
     signed_agreement_id?: string | null;
     invalid_reason: string | null;
     created_at: string;
+    customer_name?: string | null;
+    customer_email?: string | null;
+    revenue?: number | string | null;
     fulfillment_type?: string | null;
     delivery_address?: string | null;
+    service_count?: number | string | null;
+    service_product_ids?: string | null;
+    has_upsell?: number | boolean | null;
 }
 
 interface AgreementData {

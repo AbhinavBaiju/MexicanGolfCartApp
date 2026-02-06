@@ -464,24 +464,60 @@ async function handleBookingsGet(request: Request, env: Env, shopId: number): Pr
     const startDate = url.searchParams.get('start_date');
     const endDate = url.searchParams.get('end_date');
     const search = url.searchParams.get('search');
+    const datePreset = url.searchParams.get('date_preset');
+    const locationCode = url.searchParams.get('location_code');
+    const fulfillmentType = url.searchParams.get('fulfillment_type');
+    const upsell = url.searchParams.get('upsell');
+    const sortDirectionParam = (url.searchParams.get('sort_direction') || 'desc').toLowerCase();
+    const productIdParam = url.searchParams.get('product_id');
+    const productId = productIdParam ? parsePositiveInt(productIdParam) : null;
+
+    const validStatuses = new Set(['HOLD', 'CONFIRMED', 'RELEASED', 'EXPIRED', 'INVALID', 'CANCELLED', 'WAITLIST']);
+    const validDatePresets = new Set(['upcoming']);
+    const validFulfillmentTypes = new Set(['Pick Up', 'Delivery']);
+    const validUpsellOptions = new Set(['with_upsell', 'without_upsell']);
+    const sortDirection = sortDirectionParam === 'asc' ? 'ASC' : 'DESC';
+
+    if (status && !validStatuses.has(status)) {
+        return jsonError('Invalid status filter', 400);
+    }
+    if (datePreset && !validDatePresets.has(datePreset)) {
+        return jsonError('Invalid date preset filter', 400);
+    }
+    if (fulfillmentType && !validFulfillmentTypes.has(fulfillmentType)) {
+        return jsonError('Invalid fulfillment type filter', 400);
+    }
+    if (upsell && !validUpsellOptions.has(upsell)) {
+        return jsonError('Invalid upsell filter', 400);
+    }
+    if (sortDirectionParam !== 'asc' && sortDirectionParam !== 'desc') {
+        return jsonError('Invalid sort direction', 400);
+    }
+    if (productIdParam && !productId) {
+        return jsonError('Invalid product_id filter', 400);
+    }
 
     if ((startDate && !parseDateParts(startDate)) || (endDate && !parseDateParts(endDate))) {
         return jsonError('Invalid date range', 400);
     }
 
-        // Look up the shop domain once so we can join to signed_agreements (keyed by shop_domain).
-        const shopRow = await env.DB.prepare('SELECT shop_domain FROM shops WHERE id = ?').bind(shopId).first();
-        const shopDomain = shopRow && isRecord(shopRow) ? (shopRow.shop_domain as string | null) : null;
+    // Look up the shop domain once so we can join to signed_agreements (keyed by shop_domain).
+    const shopRow = await env.DB.prepare('SELECT shop_domain FROM shops WHERE id = ?').bind(shopId).first();
+    const shopDomain = shopRow && isRecord(shopRow) ? (shopRow.shop_domain as string | null) : null;
 
-        let sql =
-                `SELECT b.booking_token, b.status, b.location_code, b.start_date, b.end_date, b.order_id, b.invalid_reason,
-                                b.created_at, b.updated_at, b.customer_name, b.customer_email, b.revenue, b.fulfillment_type, b.delivery_address,
-                                s.id as signed_agreement_id
-                 FROM bookings b
-                 LEFT JOIN signed_agreements s
-                     ON s.order_id = b.order_id AND s.shop_domain = ?
-                 WHERE b.shop_id = ?`;
-        const bindings: (string | number)[] = [shopDomain ?? '', shopId];
+    let sql =
+        `SELECT b.booking_token, b.status, b.location_code, b.start_date, b.end_date, b.order_id, b.invalid_reason,
+                        b.created_at, b.updated_at, b.customer_name, b.customer_email, b.revenue, b.fulfillment_type, b.delivery_address,
+                        s.id as signed_agreement_id,
+                        COUNT(DISTINCT bi.product_id) as service_count,
+                        GROUP_CONCAT(DISTINCT bi.product_id) as service_product_ids,
+                        CASE WHEN COUNT(DISTINCT bi.product_id) > 1 THEN 1 ELSE 0 END as has_upsell
+         FROM bookings b
+         LEFT JOIN booking_items bi ON bi.booking_id = b.id
+         LEFT JOIN signed_agreements s
+             ON s.order_id = b.order_id AND s.shop_domain = ?
+         WHERE b.shop_id = ?`;
+    const bindings: (string | number)[] = [shopDomain ?? '', shopId];
     if (status) {
         sql += ' AND b.status = ?';
         bindings.push(status);
@@ -494,12 +530,51 @@ async function handleBookingsGet(request: Request, env: Env, shopId: number): Pr
         sql += ' AND b.end_date <= ?';
         bindings.push(endDate);
     }
+    if (datePreset === 'upcoming') {
+        sql += ' AND b.start_date >= ?';
+        bindings.push(getTodayInTimeZone(STORE_TIMEZONE));
+    }
+    if (locationCode && locationCode.trim().length > 0) {
+        sql += ' AND b.location_code = ?';
+        bindings.push(locationCode.trim());
+    }
+    if (fulfillmentType) {
+        sql += ' AND b.fulfillment_type = ?';
+        bindings.push(fulfillmentType);
+    }
+    if (productId) {
+        sql += ' AND EXISTS (SELECT 1 FROM booking_items bi_filter WHERE bi_filter.booking_id = b.id AND bi_filter.product_id = ?)';
+        bindings.push(productId);
+    }
+    if (upsell === 'with_upsell') {
+        sql += ` AND EXISTS (
+            SELECT 1
+            FROM booking_items bi_upsell
+            WHERE bi_upsell.booking_id = b.id
+            GROUP BY bi_upsell.booking_id
+            HAVING COUNT(DISTINCT bi_upsell.product_id) > 1
+        )`;
+    }
+    if (upsell === 'without_upsell') {
+        sql += ` AND NOT EXISTS (
+            SELECT 1
+            FROM booking_items bi_upsell
+            WHERE bi_upsell.booking_id = b.id
+            GROUP BY bi_upsell.booking_id
+            HAVING COUNT(DISTINCT bi_upsell.product_id) > 1
+        )`;
+    }
     if (search) {
-        const term = `%${search}%`;
-        sql += ' AND (b.booking_token LIKE ? OR b.order_id LIKE ? OR b.customer_name LIKE ? OR b.customer_email LIKE ?)';
+        const term = `%${search.trim()}%`;
+        sql += ' AND (b.booking_token LIKE ? OR CAST(b.order_id AS TEXT) LIKE ? OR b.customer_name LIKE ? OR b.customer_email LIKE ?)';
         bindings.push(term, term, term, term);
     }
-    sql += ' ORDER BY b.start_date DESC';
+
+    sql += ` GROUP BY
+        b.id, b.booking_token, b.status, b.location_code, b.start_date, b.end_date, b.order_id, b.invalid_reason,
+        b.created_at, b.updated_at, b.customer_name, b.customer_email, b.revenue, b.fulfillment_type, b.delivery_address,
+        s.id`;
+    sql += ` ORDER BY b.start_date ${sortDirection}, b.created_at DESC`;
 
     const rows = await env.DB.prepare(sql).bind(...bindings).all();
     return Response.json({ ok: true, bookings: rows.results ?? [] });

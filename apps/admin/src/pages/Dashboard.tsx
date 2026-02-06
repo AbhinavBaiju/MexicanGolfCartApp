@@ -1,20 +1,22 @@
 import {
-    Page,
-    Layout,
+    ActionList,
+    Box,
     Button,
     ButtonGroup,
+    Card,
     InlineStack,
-    Box,
+    Layout,
+    Page,
+    Popover,
+    Spinner,
     Text,
     TextField,
-    Card,
-    Spinner,
 } from '@shopify/polaris';
 import { SearchIcon, ExportIcon, ArrowUpIcon, PlusIcon } from '@shopify/polaris-icons';
+import { useCallback, useEffect, useState } from 'react';
 import { DashboardStats } from '../components/DashboardStats';
 import { ProductInventory } from '../components/ProductInventory';
 import { BookingsCalendar } from '../components/BookingsCalendar';
-import { useEffect, useState, useCallback } from 'react';
 import { useAuthenticatedFetch } from '../api';
 import type { Booking } from '../components/BookingCard';
 import { BookingCard } from '../components/BookingCard';
@@ -38,12 +40,10 @@ const DASHBOARD_STYLES = `
         display: flex;
         flex-direction: column;
     }
-    /* Target common Polaris inner containers to ensure they stretch */
     .full-height-card-wrapper .Polaris-Card .Polaris-BlockStack,
     .full-height-card-wrapper .Polaris-Card .Polaris-InlineStack {
         flex: 1;
     }
-    /* Ensure the calendar grid specifically stretches */
     .full-height-card-wrapper #calendar-box > div {
         flex: 1;
         display: flex;
@@ -51,119 +51,379 @@ const DASHBOARD_STYLES = `
     }
 `;
 
+interface ProductStat {
+    product_id: number;
+    count: number;
+}
+
+interface DashboardStatsResponse {
+    stats?: {
+        revenue?: string | number | null;
+        bookings_count?: string | number | null;
+        cancelled_count?: string | number | null;
+    };
+    productStats?: Array<{
+        product_id: string | number;
+        count: string | number;
+    }>;
+}
+
+interface DashboardBooking extends Booking {
+    customer_name?: string | null;
+    customer_email?: string | null;
+    revenue?: string | number | null;
+    service_count?: string | number | null;
+    service_product_ids?: string | null;
+    has_upsell?: number | boolean | null;
+}
+
+interface BookingsResponse {
+    bookings?: DashboardBooking[];
+}
+
+interface ProductConfigResponse {
+    products?: Array<{ product_id: string | number }>;
+}
+
+interface LocationsResponse {
+    locations?: Array<{ code: string; name: string }>;
+}
+
+interface FilterOption {
+    label: string;
+    value: string;
+}
+
+interface FilterPopoverProps {
+    options: FilterOption[];
+    selectedValue: string;
+    onSelect: (value: string) => void;
+}
+
+const TYPE_OPTIONS: FilterOption[] = [
+    { label: 'All types', value: 'all' },
+    { label: 'Pick Up', value: 'Pick Up' },
+    { label: 'Delivery', value: 'Delivery' },
+];
+
+const STATUS_OPTIONS: FilterOption[] = [
+    { label: 'All statuses', value: 'all' },
+    { label: 'Confirmed', value: 'CONFIRMED' },
+    { label: 'Hold', value: 'HOLD' },
+    { label: 'Cancelled', value: 'CANCELLED' },
+    { label: 'Released', value: 'RELEASED' },
+    { label: 'Expired', value: 'EXPIRED' },
+    { label: 'Invalid', value: 'INVALID' },
+];
+
+const UPSELL_OPTIONS: FilterOption[] = [
+    { label: 'Upsell', value: 'all' },
+    { label: 'With upsell', value: 'with_upsell' },
+    { label: 'Without upsell', value: 'without_upsell' },
+];
+
+function toNumber(value: string | number | null | undefined): number {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return value;
+    }
+    if (typeof value === 'string' && value.trim() !== '') {
+        const parsed = Number(value);
+        if (Number.isFinite(parsed)) {
+            return parsed;
+        }
+    }
+    return 0;
+}
+
+function parseServiceIds(value: string | null | undefined): string[] {
+    if (!value) {
+        return [];
+    }
+    return value
+        .split(',')
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0);
+}
+
+function hasUpsell(booking: DashboardBooking): boolean {
+    if (typeof booking.has_upsell === 'boolean') {
+        return booking.has_upsell;
+    }
+    if (toNumber(booking.has_upsell ? 1 : 0) > 0) {
+        return true;
+    }
+    const serviceCount = toNumber(booking.service_count);
+    if (serviceCount > 1) {
+        return true;
+    }
+    return parseServiceIds(booking.service_product_ids).length > 1;
+}
+
+function escapeCsvValue(value: string | number | null | undefined): string {
+    const raw = value === null || value === undefined ? '' : String(value);
+    const escaped = raw.replace(/"/g, '""');
+    return `"${escaped}"`;
+}
+
+function FilterPopover({ options, selectedValue, onSelect }: FilterPopoverProps) {
+    const [active, setActive] = useState(false);
+    const selected = options.find((option) => option.value === selectedValue);
+
+    const items = options.map((option) => ({
+        content: option.label,
+        active: option.value === selectedValue,
+        onAction: () => {
+            onSelect(option.value);
+            setActive(false);
+        },
+    }));
+
+    return (
+        <Popover
+            active={active}
+            activator={
+                <Button disclosure onClick={() => setActive((prev) => !prev)}>
+                    {selected?.label ?? options[0]?.label ?? 'Filter'}
+                </Button>
+            }
+            onClose={() => setActive(false)}
+            autofocusTarget="first-node"
+        >
+            <ActionList items={items} />
+        </Popover>
+    );
+}
+
 export default function Dashboard() {
     const fetch = useAuthenticatedFetch();
-    const [bookings, setBookings] = useState<Booking[]>([]);
+    const [calendarBookings, setCalendarBookings] = useState<Booking[]>([]);
+    const [filteredBookings, setFilteredBookings] = useState<DashboardBooking[]>([]);
     const [stats, setStats] = useState({
         revenue: 0,
         bookingsCount: 0,
-        cancelledCount: 0
+        cancelledCount: 0,
     });
-    const [productStats, setProductStats] = useState<any[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [productStats, setProductStats] = useState<ProductStat[]>([]);
+    const [loadingDashboard, setLoadingDashboard] = useState(true);
+    const [loadingBookings, setLoadingBookings] = useState(true);
+    const [dashboardError, setDashboardError] = useState<string | null>(null);
+    const [bookingsError, setBookingsError] = useState<string | null>(null);
+
     const [searchQuery, setSearchQuery] = useState('');
+    const [debouncedSearch, setDebouncedSearch] = useState('');
+
+    const [upcomingOnly, setUpcomingOnly] = useState(true);
+    const [selectedService, setSelectedService] = useState('all');
+    const [selectedTeammate, setSelectedTeammate] = useState('all');
+    const [selectedType, setSelectedType] = useState('all');
+    const [selectedStatus, setSelectedStatus] = useState('all');
+    const [selectedUpsell, setSelectedUpsell] = useState('all');
+    const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+
+    const [serviceOptions, setServiceOptions] = useState<FilterOption[]>([{ label: 'All services', value: 'all' }]);
+    const [teammateOptions, setTeammateOptions] = useState<FilterOption[]>([{ label: 'All teammates', value: 'all' }]);
 
     const loadData = useCallback(async () => {
-        setLoading(true);
+        setLoadingDashboard(true);
         try {
-            const response = await fetch('/dashboard');
-            if (response.ok) {
-                const data = await response.json();
+            const [dashboardRes, bookingsRes, productsRes, locationsRes] = await Promise.all([
+                fetch('/dashboard'),
+                fetch('/bookings'),
+                fetch('/products'),
+                fetch('/locations'),
+            ]);
 
-                // data.upcomingBookings is just top 5. We should store them.
-                // But the UI filters 'bookings' for upcoming.
-                // The current UI logic (filtering 'bookings' array) assumes we have ALL bookings.
-                // /dashboard only returns top 5 upcoming.
-                // Does /dashboard return ALL bookings? No.
-                // So the "Upcoming bookings" section needs to use `data.upcomingBookings`.
-                // And logic `bookings.filter` is redundant if we use `data.upcomingBookings`.
-                // However, `BookingsCalendar` needs bookings date ranges.
-                // If I want the Calendar to work, I need more bookings.
-                // Maybe I should fetch `/bookings` alongside?
-                // The prompt says "wire everything together".
-                // Efficient way: Fetch `/bookings?start_date=...&end_date=...` for calendar.
-                // For now, I'll fetch `/bookings` (all active/recent) to populate calendar and list if `/dashboard` is insufficient.
-                // But let's check what I implemented in backend `handleDashboardGet`.
-                // It returns `upcomingBookings` (limit 5).
-                // It returns `stats` (aggregates).
-
-                // To display the Calendar properly, I need all bookings for the month.
-                // I will fetch `/bookings` as well.
-
-                const [, bookingsRes] = await Promise.all([
-                    Promise.resolve(data), // already json
-                    fetch('/bookings')
-                ]);
-
-                if (bookingsRes.ok) {
-                    const bookingsData = await bookingsRes.json();
-                    setBookings(bookingsData.bookings || []);
-                }
+            if (dashboardRes.ok) {
+                const dashboardData = (await dashboardRes.json()) as DashboardStatsResponse;
+                const revenue = toNumber(dashboardData.stats?.revenue);
+                const bookingsCount = toNumber(dashboardData.stats?.bookings_count);
+                const cancelledCount = toNumber(dashboardData.stats?.cancelled_count);
+                const normalizedProductStats = (dashboardData.productStats || [])
+                    .map((entry) => {
+                        const productId = toNumber(entry.product_id);
+                        if (!Number.isInteger(productId) || productId <= 0) {
+                            return null;
+                        }
+                        return {
+                            product_id: productId,
+                            count: toNumber(entry.count),
+                        };
+                    })
+                    .filter((entry): entry is ProductStat => entry !== null);
 
                 setStats({
-                    revenue: parseFloat(data.stats.revenue || '0'),
-                    bookingsCount: parseInt(data.stats.bookings_count || '0'),
-                    cancelledCount: parseInt(data.stats.cancelled_count || '0'),
+                    revenue,
+                    bookingsCount,
+                    cancelledCount,
                 });
-                setProductStats(data.productStats || []);
+                setProductStats(normalizedProductStats);
+                setDashboardError(null);
+            } else {
+                setDashboardError('Failed to load dashboard summary.');
+            }
+
+            if (bookingsRes.ok) {
+                const bookingsData = (await bookingsRes.json()) as BookingsResponse;
+                setCalendarBookings(Array.isArray(bookingsData.bookings) ? bookingsData.bookings : []);
+            }
+
+            if (productsRes.ok) {
+                const productsData = (await productsRes.json()) as ProductConfigResponse;
+                const serviceIds = (productsData.products || [])
+                    .map((entry) => toNumber(entry.product_id))
+                    .filter((id) => Number.isInteger(id) && id > 0)
+                    .sort((a, b) => a - b);
+                setServiceOptions([
+                    { label: 'All services', value: 'all' },
+                    ...serviceIds.map((id) => ({ label: `Service ${id}`, value: String(id) })),
+                ]);
+            }
+
+            if (locationsRes.ok) {
+                const locationsData = (await locationsRes.json()) as LocationsResponse;
+                const nextOptions: FilterOption[] = [{ label: 'All teammates', value: 'all' }];
+                const seenCodes = new Set<string>();
+                for (const location of locationsData.locations || []) {
+                    const code = location.code.trim();
+                    if (!code || seenCodes.has(code)) {
+                        continue;
+                    }
+                    seenCodes.add(code);
+                    nextOptions.push({
+                        label: location.name?.trim() || code,
+                        value: code,
+                    });
+                }
+                setTeammateOptions(nextOptions);
             }
         } catch (error) {
             console.error('Error fetching dashboard data:', error);
+            setDashboardError('Failed to load dashboard data.');
         } finally {
-            setLoading(false);
+            setLoadingDashboard(false);
         }
     }, [fetch]);
 
     useEffect(() => {
-        loadData();
+        void loadData();
     }, [loadData]);
+
+    useEffect(() => {
+        const timer = setTimeout(() => setDebouncedSearch(searchQuery), 350);
+        return () => clearTimeout(timer);
+    }, [searchQuery]);
+
+    const loadFilteredBookings = useCallback(async (search: string) => {
+        setLoadingBookings(true);
+        try {
+            const params = new URLSearchParams();
+            params.set('sort_direction', sortDirection);
+            if (upcomingOnly) {
+                params.set('date_preset', 'upcoming');
+            }
+            if (selectedService !== 'all') {
+                params.set('product_id', selectedService);
+            }
+            if (selectedTeammate !== 'all') {
+                params.set('location_code', selectedTeammate);
+            }
+            if (selectedType !== 'all') {
+                params.set('fulfillment_type', selectedType);
+            }
+            if (selectedStatus !== 'all') {
+                params.set('status', selectedStatus);
+            }
+            if (selectedUpsell !== 'all') {
+                params.set('upsell', selectedUpsell);
+            }
+            const trimmedSearch = search.trim();
+            if (trimmedSearch.length > 0) {
+                params.set('search', trimmedSearch);
+            }
+
+            const response = await fetch(`/bookings?${params.toString()}`);
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(errorText || 'Failed to load bookings');
+            }
+            const data = (await response.json()) as BookingsResponse;
+            setFilteredBookings(Array.isArray(data.bookings) ? data.bookings : []);
+            setBookingsError(null);
+        } catch (error) {
+            console.error('Error loading filtered bookings:', error);
+            setFilteredBookings([]);
+            setBookingsError('Failed to load filtered bookings.');
+        } finally {
+            setLoadingBookings(false);
+        }
+    }, [fetch, selectedService, selectedStatus, selectedTeammate, selectedType, selectedUpsell, sortDirection, upcomingOnly]);
+
+    useEffect(() => {
+        void loadFilteredBookings(debouncedSearch);
+    }, [debouncedSearch, loadFilteredBookings]);
 
     const handleMarkComplete = async (token: string) => {
         const res = await fetch(`/bookings/${token}/complete`, { method: 'POST' });
         if (res.ok) {
-            loadData();
+            await Promise.all([loadData(), loadFilteredBookings(debouncedSearch)]);
         } else {
             console.error('Failed to complete');
         }
     };
 
-    const upcomingBookings = bookings.filter(b => {
-        if (b.status !== 'CONFIRMED') return false;
-        const bookingDate = new Date(b.start_date);
-        return bookingDate >= new Date();
-    });
+    const handleExport = () => {
+        if (filteredBookings.length === 0) {
+            return;
+        }
 
-    // Server-side search
-    const [searchResults, setSearchResults] = useState<Booking[] | null>(null);
+        const header = [
+            'booking_token',
+            'status',
+            'customer_name',
+            'customer_email',
+            'location_code',
+            'start_date',
+            'end_date',
+            'order_id',
+            'fulfillment_type',
+            'service_product_ids',
+            'service_count',
+            'has_upsell',
+            'revenue',
+        ];
 
-    useEffect(() => {
-        const timer = setTimeout(async () => {
-            if (!searchQuery) {
-                setSearchResults(null);
-                return;
-            }
-            try {
-                const res = await fetch(`/bookings?search=${encodeURIComponent(searchQuery)}`);
-                if (res.ok) {
-                    const data = await res.json();
-                    setSearchResults(data.bookings || []);
-                }
-            } catch (e) {
-                console.error(e);
-            }
-        }, 500); // Debounce
-        return () => clearTimeout(timer);
-    }, [searchQuery, fetch]);
+        const rows = filteredBookings.map((booking) => [
+            escapeCsvValue(booking.booking_token),
+            escapeCsvValue(booking.status),
+            escapeCsvValue(booking.customer_name ?? ''),
+            escapeCsvValue(booking.customer_email ?? ''),
+            escapeCsvValue(booking.location_code),
+            escapeCsvValue(booking.start_date),
+            escapeCsvValue(booking.end_date),
+            escapeCsvValue(booking.order_id ?? ''),
+            escapeCsvValue(booking.fulfillment_type ?? ''),
+            escapeCsvValue(booking.service_product_ids ?? ''),
+            escapeCsvValue(booking.service_count ?? ''),
+            escapeCsvValue(hasUpsell(booking) ? 'Yes' : 'No'),
+            escapeCsvValue(booking.revenue ?? ''),
+        ]);
 
-    // Use search results if query exists, otherwise show default upcoming filter from local list
-    const displayedBookings = searchQuery
-        ? searchResults || []
-        : upcomingBookings;
+        const csv = `${header.join(',')}\n${rows.map((row) => row.join(',')).join('\n')}`;
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `bookings-export-${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    };
 
     return (
         <Page fullWidth>
             <style dangerouslySetInnerHTML={{ __html: DASHBOARD_STYLES }} />
-            {/* Header Section */}
+
             <div style={{ marginBottom: '20px' }}>
                 <InlineStack align="space-between" blockAlign="center">
                     <Text as="h1" variant="headingLg">Dashboard</Text>
@@ -174,24 +434,13 @@ export default function Dashboard() {
                 </InlineStack>
             </div>
 
-
-            {/* Filters */}
-            <div style={{ marginBottom: '20px' }}>
-                <InlineStack gap="200">
-                    <Button icon={<span style={{ marginRight: 4 }}>📅</span>}>Last 30 days</Button>
-                    <Button>All services</Button>
-                </InlineStack>
-            </div>
-
-            {/* Dashboard Grid Section */}
             <div style={{
                 display: 'grid',
                 gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))',
                 gap: '20px',
                 alignItems: 'stretch',
-                marginBottom: '20px'
+                marginBottom: '20px',
             }}>
-                {/* Left Column: Stats + Chart */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
                     <DashboardStats stats={stats} />
                     <div className="full-height-card-wrapper" style={{ flex: 1 }}>
@@ -199,27 +448,24 @@ export default function Dashboard() {
                     </div>
                 </div>
 
-                {/* Right Column: Calendar */}
                 <div className="full-height-card-wrapper">
-                    <BookingsCalendar bookings={bookings} />
+                    <BookingsCalendar bookings={calendarBookings} />
                 </div>
             </div>
 
             <Layout>
-                {/* Upcoming Bookings Section */}
                 <Layout.Section>
                     <div style={{ marginTop: '20px' }}>
                         <InlineStack gap="200" align="center" blockAlign="center">
                             <Text as="h2" variant="headingMd">Upcoming bookings</Text>
                             <div style={{ background: '#e4e5e7', color: 'black', borderRadius: '12px', padding: '0 8px', fontSize: '12px', fontWeight: 'bold' }}>
-                                {upcomingBookings.length}
+                                {filteredBookings.length}
                             </div>
                         </InlineStack>
 
                         <div style={{ marginTop: '16px' }}>
                             <Card>
                                 <Box padding="400">
-                                    {/* Search Bar */}
                                     <div style={{ marginBottom: '16px' }}>
                                         <TextField
                                             label="Search"
@@ -232,26 +478,57 @@ export default function Dashboard() {
                                         />
                                     </div>
 
-                                    {/* Create Filter Buttons Row */}
                                     <div style={{ marginBottom: '16px' }}>
                                         <InlineStack gap="200" align="start">
-                                            <Button icon={<span style={{ marginRight: 4 }}>📅</span>}>Upcoming</Button>
-                                            <Button disclosure>All services</Button>
-                                            <Button disclosure>All teammates</Button>
-                                            <Button disclosure>All types</Button>
-                                            <Button disclosure>All statuses</Button>
-                                            <Button disclosure>Upsell</Button>
-                                            <Button icon={ArrowUpIcon} />
-                                            <Button icon={ExportIcon}>Export</Button>
+                                            <Button pressed={upcomingOnly} onClick={() => setUpcomingOnly((prev) => !prev)}>
+                                                Upcoming
+                                            </Button>
+                                            <FilterPopover
+                                                options={serviceOptions}
+                                                selectedValue={selectedService}
+                                                onSelect={setSelectedService}
+                                            />
+                                            <FilterPopover
+                                                options={teammateOptions}
+                                                selectedValue={selectedTeammate}
+                                                onSelect={setSelectedTeammate}
+                                            />
+                                            <FilterPopover
+                                                options={TYPE_OPTIONS}
+                                                selectedValue={selectedType}
+                                                onSelect={setSelectedType}
+                                            />
+                                            <FilterPopover
+                                                options={STATUS_OPTIONS}
+                                                selectedValue={selectedStatus}
+                                                onSelect={setSelectedStatus}
+                                            />
+                                            <FilterPopover
+                                                options={UPSELL_OPTIONS}
+                                                selectedValue={selectedUpsell}
+                                                onSelect={setSelectedUpsell}
+                                            />
+                                            <Button
+                                                icon={ArrowUpIcon}
+                                                pressed={sortDirection === 'asc'}
+                                                accessibilityLabel="Toggle sort direction"
+                                                onClick={() => setSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'))}
+                                            />
+                                            <Button icon={ExportIcon} onClick={handleExport} disabled={filteredBookings.length === 0}>
+                                                Export
+                                            </Button>
                                         </InlineStack>
                                     </div>
 
-                                    {/* Content */}
-                                    {loading && !searchResults ? (
+                                    {(loadingDashboard || loadingBookings) ? (
                                         <Box padding="1600">
                                             <InlineStack align="center"><Spinner size="large" /></InlineStack>
                                         </Box>
-                                    ) : displayedBookings.length === 0 ? (
+                                    ) : dashboardError || bookingsError ? (
+                                        <Box padding="400">
+                                            <Text as="p" tone="critical">{dashboardError || bookingsError}</Text>
+                                        </Box>
+                                    ) : filteredBookings.length === 0 ? (
                                         <div style={{ padding: '60px 0', textAlign: 'center' }}>
                                             <SearchIcon style={{ width: 60, height: 60, color: '#8c9196', margin: '0 auto', display: 'block' }} />
                                             <div style={{ height: 16 }} />
@@ -260,17 +537,17 @@ export default function Dashboard() {
                                         </div>
                                     ) : (
                                         <div>
-                                            {displayedBookings.slice(0, 5).map(booking => (
+                                            {filteredBookings.slice(0, 5).map((booking) => (
                                                 <BookingCard
                                                     key={booking.booking_token}
                                                     booking={booking}
                                                     onMarkComplete={handleMarkComplete}
                                                 />
                                             ))}
-                                            {displayedBookings.length > 5 && (
+                                            {filteredBookings.length > 5 && (
                                                 <Box padding="400">
                                                     <InlineStack align="center">
-                                                        <Button variant="plain">View all upcoming bookings</Button>
+                                                        <Button variant="plain">View all filtered bookings</Button>
                                                     </InlineStack>
                                                 </Box>
                                             )}

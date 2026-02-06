@@ -9,9 +9,11 @@
         "shared"
     ],
     "scripts": {
-        "dev": "concurrently \"npm run dev:shopify\" \"npm run dev:worker\"",
-        "dev:shopify": "cd apps/shopify/mexican-golf-cart && npm run dev",
-        "dev:worker": "cd worker && npm run dev",
+        "dev": "concurrently --kill-others-on-fail --names \"worker,shopify,pages\" --prefix-colors \"blue,green,magenta\" \"npm run dev:worker\" \"npm run dev:shopify\" \"npm run dev:pages\"",
+        "dev:shopify": "cd apps/shopify/mexican-golf-cart && npm run dev -- --config dev --no-update",
+        "dev:worker": "node scripts/dev-worker-live.mjs",
+        "dev:worker:local": "cd worker && npm run dev",
+        "dev:pages": "cd apps/admin && VITE_WORKER_ADMIN_BASE_URL=https://mexican-golf-cart-worker-dev.explaincaption.workers.dev npm run dev -- --host 0.0.0.0 --port 4173",
         "test": "echo \"Error: no test specified\" && exit 1"
     },
     "devDependencies": {

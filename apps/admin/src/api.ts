@@ -34,7 +34,11 @@ export function useAuthenticatedFetch() {
         }
 
         const path = url.startsWith('/') ? url : `/${url}`;
-        const fullUrl = `https://mexican-golf-cart-worker.explaincaption.workers.dev/admin${path}`;
+        const baseUrl = (
+            import.meta.env.VITE_WORKER_ADMIN_BASE_URL ??
+            'https://mexican-golf-cart-worker.explaincaption.workers.dev'
+        ).replace(/\/$/, '');
+        const fullUrl = `${baseUrl}/admin${path}`;
 
         const response = await fetch(fullUrl, {
             ...options,

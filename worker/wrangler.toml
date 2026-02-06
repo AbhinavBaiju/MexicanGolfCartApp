@@ -21,6 +21,8 @@ database_id = "61380274-7091-41f0-b6b1-eb0a587a7687"
 [env.dev]
 [env.dev.vars]
 ENVIRONMENT = "dev"
+SHOPIFY_API_KEY = "ec7f70d8e7c5f2ec9cb8b6811b23e491"
+SHOPIFY_APP_URL = "https://mexican-golf-cart-worker-dev.explaincaption.workers.dev"
 [[env.dev.d1_databases]]
 binding = "DB"
 database_name = "mexican-golf-cart-db-dev"

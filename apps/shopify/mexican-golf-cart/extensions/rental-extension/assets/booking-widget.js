@@ -39,6 +39,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // New Elements
             fulfillmentRadios: form.querySelectorAll('input[name="fulfillment_type"]'),
+            fulfillmentSelect: form.querySelector('.gc-fulfillment-select'),
             pickupDetails: form.querySelector('.gc-pickup-details'),
             deliveryDetails: form.querySelector('.gc-delivery-details'),
             deliveryAddress: form.querySelector('[name="delivery_address"]'),
@@ -283,6 +284,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         function attachListeners() {
             const inputs = [elements.start, elements.end, elements.location, elements.quantity];
+            const applyFulfillmentSelection = (value) => {
+                const isPickup = value === 'pickup';
+                if (elements.pickupDetails) elements.pickupDetails.style.display = isPickup ? 'block' : 'none';
+                if (elements.deliveryDetails) elements.deliveryDetails.style.display = isPickup ? 'none' : 'block';
+
+                if (elements.deliveryAddress) {
+                    elements.deliveryAddress.required = !isPickup;
+                }
+            };
 
             inputs.forEach(input => {
                 if (!input) return;
@@ -325,16 +335,32 @@ document.addEventListener('DOMContentLoaded', () => {
             if (elements.fulfillmentRadios.length) {
                 elements.fulfillmentRadios.forEach(radio => {
                     radio.addEventListener('change', (e) => {
-                        const isPickup = e.target.value === 'pickup';
-                        if (elements.pickupDetails) elements.pickupDetails.style.display = isPickup ? 'block' : 'none';
-                        if (elements.deliveryDetails) elements.deliveryDetails.style.display = isPickup ? 'none' : 'block';
-
-                        // Toggle required
-                        if (elements.deliveryAddress) {
-                            elements.deliveryAddress.required = !isPickup;
+                        const selectedValue = e.target.value;
+                        if (elements.fulfillmentSelect && elements.fulfillmentSelect.value !== selectedValue) {
+                            elements.fulfillmentSelect.value = selectedValue;
                         }
+                        applyFulfillmentSelection(selectedValue);
                     });
                 });
+            }
+
+            if (elements.fulfillmentSelect) {
+                elements.fulfillmentSelect.addEventListener('change', (e) => {
+                    const selectedValue = e.target.value;
+                    const matchingRadio = form.querySelector(`input[name="fulfillment_type"][value="${selectedValue}"]`);
+                    if (matchingRadio) {
+                        matchingRadio.checked = true;
+                    }
+                    applyFulfillmentSelection(selectedValue);
+                });
+            }
+
+            const defaultFulfillment = form.querySelector('input[name="fulfillment_type"]:checked');
+            if (defaultFulfillment) {
+                if (elements.fulfillmentSelect) {
+                    elements.fulfillmentSelect.value = defaultFulfillment.value;
+                }
+                applyFulfillmentSelection(defaultFulfillment.value);
             }
 
             // Update Address Display
@@ -462,6 +488,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // 2. Add to Cart
                 updateStatus('Adding to cart...', 'loading');
+                const selectedFulfillment = form.querySelector('input[name="fulfillment_type"]:checked');
+                const fulfillmentValue = selectedFulfillment ? selectedFulfillment.value : 'pickup';
 
                 const cartRes = await fetch('/cart/add.js', {
                     method: 'POST',
@@ -476,8 +504,8 @@ document.addEventListener('DOMContentLoaded', () => {
                                 'End Date': elements.end.value,
                                 'Location': elements.location.options[elements.location.selectedIndex].text,
                                 'Location Code': elements.location.value,
-                                'Fulfillment Type': form.querySelector('input[name="fulfillment_type"]:checked').value === 'pickup' ? 'Pick Up' : 'Drop Off (Delivery)',
-                                ...(form.querySelector('input[name="fulfillment_type"]:checked').value === 'delivery' && elements.deliveryAddress && elements.deliveryAddress.value
+                                'Fulfillment Type': fulfillmentValue === 'pickup' ? 'Pick Up' : 'Drop Off (Delivery)',
+                                ...(fulfillmentValue === 'delivery' && elements.deliveryAddress && elements.deliveryAddress.value
                                     ? { 'Delivery Address': elements.deliveryAddress.value }
                                     : {})
                             }

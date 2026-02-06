@@ -1,0 +1,35 @@
+# Dedicated dev app config for `shopify app dev --config dev --no-update`
+
+client_id = "ec7f70d8e7c5f2ec9cb8b6811b23e491"
+name = "Mexico Golf Carts"
+application_url = "https://master.mexican-golf-cart-admin.pages.dev"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = false
+
+[webhooks]
+api_version = "2026-04"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "https://mexican-golf-cart-worker-dev.explaincaption.workers.dev/webhooks/app/uninstalled"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "https://mexican-golf-cart-worker-dev.explaincaption.workers.dev/webhooks/app/scopes_update"
+
+  [[webhooks.subscriptions]]
+  topics = [ "orders/create" ]
+  uri = "https://mexican-golf-cart-worker-dev.explaincaption.workers.dev/webhooks/orders/create"
+
+[access_scopes]
+scopes = "read_products,write_products,read_orders,write_orders"
+
+[app_proxy]
+url = "https://mexican-golf-cart-worker-dev.explaincaption.workers.dev/proxy"
+subpath = "rental"
+prefix = "apps"
+
+[auth]
+redirect_urls = [ "https://mexican-golf-cart-worker-dev.explaincaption.workers.dev/auth/callback" ]

@@ -1,6 +1,12 @@
-<section class="mgc-white-card-section">
+{% assign is_product_page = false %}
+{% if request.page_type == 'product' or template.name == 'product' %}
+  {% assign is_product_page = true %}
+{% endif %}
+
+<section class="mgc-white-card-section{% if is_product_page %} mgc-white-card-section--product{% endif %}">
+
   <div class="booking-outer-wrapper">
-    <div class="booking-container" data-booking-widget data-shop-domain="{{ shop.permanent_domain }}" data-api-base="https://mexican-golf-cart-worker.explaincaption.workers.dev/proxy">
+    <div class="booking-container{% if is_product_page %} booking-container--product{% endif %}" data-booking-widget data-shop-domain="{{ shop.permanent_domain }}" data-api-base="/apps/rental">
       
       <!-- Booking Form Slot -->
       <div class="mgc-booking-slot">
@@ -14,28 +20,43 @@
           <a href="/pages/contact" class="gc-submit-btn">Contact Us to Book</a>
         </div>
 
-        {% assign booking_product = block.settings.product | default: product %}
+        {% if is_product_page and product %}
+          {% assign booking_product = product %}
+        {% else %}
+          {% assign booking_product = block.settings.product | default: product %}
+        {% endif %}
         
-	        <div class="gc-grid-container">
-	            <div class="gc-grid-col-left">
-	                <div class="gc-product-image-container" data-gc-product-image-container>
-	                  <img class="gc-product-image" data-gc-product-image alt="" loading="lazy" decoding="async" style="display: none;">
-	                  <div class="gc-product-image-placeholder" data-gc-product-image-placeholder>
-	                    <div class="gc-product-image-placeholder-inner">
-	                      <svg class="gc-product-image-placeholder-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-	                        <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v11A2.5 2.5 0 0 1 17.5 20h-11A2.5 2.5 0 0 1 4 17.5v-11Z" stroke="currentColor" stroke-width="1.5"/>
-	                        <path d="M8 10.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" stroke="currentColor" stroke-width="1.5"/>
-	                        <path d="M4.5 17l5.2-5.2a1.2 1.2 0 0 1 1.7 0L14 14.4l1.2-1.2a1.2 1.2 0 0 1 1.7 0L19.5 16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-	                      </svg>
-	                      <span class="gc-product-image-placeholder-text">Image coming soon</span>
+	        <div class="gc-grid-container{% if is_product_page %} gc-grid-container--product{% endif %}">
+              {% unless is_product_page %}
+	              <div class="gc-grid-col-left">
+	                  <div class="gc-product-image-container" data-gc-product-image-container>
+	                    <img class="gc-product-image" data-gc-product-image alt="" loading="lazy" decoding="async" style="display: none;">
+	                    <div class="gc-product-image-placeholder" data-gc-product-image-placeholder>
+	                      <div class="gc-product-image-placeholder-inner">
+	                        <svg class="gc-product-image-placeholder-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+	                          <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v11A2.5 2.5 0 0 1 17.5 20h-11A2.5 2.5 0 0 1 4 17.5v-11Z" stroke="currentColor" stroke-width="1.5"/>
+	                          <path d="M8 10.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" stroke="currentColor" stroke-width="1.5"/>
+	                          <path d="M4.5 17l5.2-5.2a1.2 1.2 0 0 1 1.7 0L14 14.4l1.2-1.2a1.2 1.2 0 0 1 1.7 0L19.5 16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+	                        </svg>
+	                        <span class="gc-product-image-placeholder-text">Image coming soon</span>
+	                      </div>
 	                    </div>
 	                  </div>
-	                </div>
-	            </div>
+	              </div>
+              {% endunless %}
 	            <div class="gc-grid-col-right">
-	                <form class="gc-booking-form" data-product-id="{{ booking_product.id }}" data-variant-id="{{ booking_product.selected_or_first_available_variant.id }}">
+	                <form class="gc-booking-form" data-product-id="{{ booking_product.id }}" data-variant-id="{{ booking_product.selected_or_first_available_variant.id }}" data-page-context="{{ request.page_type }}">
 	                
 	                <div class="gc-form-grid">
+                    {% if is_product_page and booking_product %}
+                      <div class="gc-product-summary">
+                        <h2 class="gc-product-summary-title">{{ booking_product.title }}</h2>
+                        <p class="gc-product-summary-price">{{ booking_product.selected_or_first_available_variant.price | money }}</p>
+                        {% if booking_product.description != blank %}
+                          <div class="gc-product-summary-description">{{ booking_product.description }}</div>
+                        {% endif %}
+                      </div>
+                    {% endif %}
                     
                     <!-- Countdown Timer -->
                     <div id="gc-timer-container" style="display: none;">
@@ -46,20 +67,22 @@
                     <!-- Status Message -->
                     <div class="gc-status-message"></div>
 
-                    <!-- Product Toggle -->
-                    <div class="gc-product-toggle-container" style="display: none;">
-                        <div class="gc-product-toggle">
-                            <!-- Pills injected by JS -->
-                        </div>
-                        <div class="gc-product-toggle-select-wrapper gc-select-wrapper">
-                          <select class="gc-product-toggle-select gc-select" aria-label="Select a rentable product"></select>
-                          <div class="gc-select-chevron">
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                              <polyline points="6 9 12 15 18 9"></polyline>
-                            </svg>
+                    {% unless is_product_page %}
+                      <!-- Product Toggle -->
+                      <div class="gc-product-toggle-container" style="display: none;">
+                          <div class="gc-product-toggle">
+                              <!-- Pills injected by JS -->
                           </div>
-                        </div>
-                    </div>
+                          <div class="gc-product-toggle-select-wrapper gc-select-wrapper">
+                            <select class="gc-product-toggle-select gc-select" aria-label="Select a rentable product"></select>
+                            <div class="gc-select-chevron">
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="6 9 12 15 18 9"></polyline>
+                              </svg>
+                            </div>
+                          </div>
+                      </div>
+                    {% endunless %}
 
                     <!-- Date Range Validation -->
                     <div class="gc-input-group">
@@ -128,8 +151,19 @@
                     </div>
 
                     <!-- Fulfillment Type -->
-                    <div class="gc-input-group">
+                    <div class="gc-input-group gc-fulfillment-group">
                         <label class="gc-label">Fulfillment Options</label>
+                        <div class="gc-fulfillment-select-wrapper gc-select-wrapper">
+                            <select class="gc-fulfillment-select gc-select" name="fulfillment_type_mobile" aria-label="Select fulfillment option">
+                                <option value="pickup" selected>Pick Up</option>
+                                <option value="delivery">Drop Off (Delivery)</option>
+                            </select>
+                            <div class="gc-select-chevron">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <polyline points="6 9 12 15 18 9"></polyline>
+                                </svg>
+                            </div>
+                        </div>
                         <div class="gc-fulfillment-options">
                             <label class="gc-radio-label">
                                 <input type="radio" name="fulfillment_type" value="pickup" checked>

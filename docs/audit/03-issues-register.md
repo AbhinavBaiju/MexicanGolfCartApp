@@ -161,6 +161,11 @@ Each entry represents a distinct issue found during the audit. Issues are ordere
 | **What's Needed to Fix** | Replace with a redirect to the admin SPA or remove the demo action. |
 | **Owner Type** | Fullstack |
 
+**Implementation Update (2026-02-07):** Resolved in M5.
+- `apps/shopify/mexican-golf-cart/app/routes/app._index.tsx` no longer contains template `productCreate` demo action/mutation code.
+- `/app` index behavior is now production-safe redirect to the real admin SPA entry path (`/bookings`).
+- This removes accidental demo product creation risk from embedded app navigation.
+
 ---
 
 ## ISS-009: Shopify Remix Route Pages Are All Placeholders
@@ -177,6 +182,14 @@ Each entry represents a distinct issue found during the audit. Issues are ordere
 | **Impact** | Confusion for developers. During production, the Vite admin SPA is served instead, so users don't see these. But the Remix NavMenu links point to these placeholder routes. |
 | **What's Needed to Fix** | Either remove these routes (since they're unused) or redirect them to the Vite admin SPA paths. |
 | **Owner Type** | Frontend |
+
+**Implementation Update (2026-02-07):** Resolved in M5.
+- Replaced placeholder route components with redirect loaders:
+  - `app.bookings.tsx`: `/app/bookings` -> `/bookings`
+  - `app.inventory.tsx`: `/app/inventory` -> `/inventory`
+  - `app.products.tsx`: `/app/products` -> `/inventory` (matches current admin `/products` legacy redirect behavior)
+  - `app.locations.tsx`: `/app/locations` -> `/locations`
+- Updated Remix `NavMenu` in `app.tsx` to point directly to real SPA paths and removed dead placeholder navigation targets.
 
 ---
 

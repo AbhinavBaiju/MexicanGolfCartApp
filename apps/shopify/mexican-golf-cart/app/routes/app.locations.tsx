@@ -1,19 +1,11 @@
-import { Page, Layout, Card, Text } from "@shopify/polaris";
-import { TitleBar } from "@shopify/app-bridge-react";
+import type { LoaderFunctionArgs } from "@remix-run/node";
 
-export default function LocationsPage() {
-    return (
-        <Page>
-            <TitleBar title="Locations" />
-            <Layout>
-                <Layout.Section>
-                    <Card>
-                        <Text as="p" variant="bodyMd">
-                            Locations page placeholder.
-                        </Text>
-                    </Card>
-                </Layout.Section>
-            </Layout>
-        </Page>
-    );
+import { redirectToAdminSpaPath } from "../utils/adminSpaRedirect.server";
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  return redirectToAdminSpaPath(request, "/locations");
+};
+
+export default function AppLocationsRedirect() {
+  return null;
 }

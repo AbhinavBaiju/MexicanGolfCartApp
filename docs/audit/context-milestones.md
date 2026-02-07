@@ -11,11 +11,13 @@
 - Milestone implementation handoff log: [docs/audit/07-m2-implementation-log.md](docs/audit/07-m2-implementation-log.md)
 - Milestone implementation handoff log: [docs/audit/09-m3-implementation-log.md](docs/audit/09-m3-implementation-log.md)
 - Milestone implementation handoff log: [docs/audit/11-m4-implementation-log.md](docs/audit/11-m4-implementation-log.md)
+- Milestone implementation handoff log: [docs/audit/14-m5-implementation-log.md](docs/audit/14-m5-implementation-log.md)
 
 ## System Snapshot (from the docs)
 - Stack: Vite+React+Polaris admin SPA (Cloudflare Pages), Cloudflare Worker + D1 backend, Shopify Remix shell for OAuth/tunnel, App Bridge v4 for auth.
 - Truth source: Worker/D1; storefront proxy handles holds; admin SPA uses `/admin/*` JWT endpoints.
-- Biggest broken UX: Bookings page filters/export/manual booking, stub buttons (Manage, FAQ, New service), Remix placeholder routes.
+- Biggest broken UX (historical): Bookings page filters/export/manual booking, stub buttons (Manage, FAQ, New service), Remix placeholder routes.
+- Remaining high-priority work: Security hardening (CORS/proxy signature), per-shop timezone persistence, and API version consistency.
 - Security gaps: wildcard CORS, proxy HMAC only on agreement/sign, SHOPIFY_API_SECRET must be a secret (not in wrangler.toml), store timezone hardcoded.
 
 ## Milestones for Implementation
@@ -53,6 +55,7 @@ Status: Completed on 2026-02-07. See [docs/audit/11-m4-implementation-log.md](do
 M5 – Shopify Remix Cleanup (ISS-008/009)
 - Remove template "Generate a product" action and placeholder routes or redirect them to the Cloudflare Pages admin SPA.
 - Align nav links to actual SPA paths; ensure dev tunnel script continues to serve Vite admin.
+Status: Completed on 2026-02-07. See [docs/audit/14-m5-implementation-log.md](docs/audit/14-m5-implementation-log.md).
 
 M6 – Security & Proxy Hardening (ISS-014/015/016/020)
 - Restrict CORS to admin origin; enforce App Proxy HMAC on all `/proxy/*` routes in production.

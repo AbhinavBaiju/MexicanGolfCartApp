@@ -1,19 +1,11 @@
-import { Page, Layout, Card, Text } from "@shopify/polaris";
-import { TitleBar } from "@shopify/app-bridge-react";
+import type { LoaderFunctionArgs } from "@remix-run/node";
 
-export default function InventoryPage() {
-    return (
-        <Page>
-            <TitleBar title="Inventory" />
-            <Layout>
-                <Layout.Section>
-                    <Card>
-                        <Text as="p" variant="bodyMd">
-                            Inventory page placeholder.
-                        </Text>
-                    </Card>
-                </Layout.Section>
-            </Layout>
-        </Page>
-    );
+import { redirectToAdminSpaPath } from "../utils/adminSpaRedirect.server";
+
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  return redirectToAdminSpaPath(request, "/inventory");
+};
+
+export default function AppInventoryRedirect() {
+  return null;
 }

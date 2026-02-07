@@ -594,6 +594,7 @@ All proxy endpoints require `?shop=<domain>` query parameter.
 | **Service labels** | Dashboard and Bookings now cross-reference product IDs with `/admin/shopify-products` titles (M4) | `GET /admin/products` still returns IDs only; `/admin/shopify-products` remains required for title enrichment |
 | **WAITLIST status** | Bookings UI no longer exposes WAITLIST tab/filter (M1) | Backend parser still accepts `WAITLIST` though DB schema disallows writes |
 | **Calendar booking count** | M3 now counts full booking spans on the client | Backend returns `start_date` + `end_date`; no dedicated day-aggregation endpoint exists yet |
+| **Remix app routes** | M5 redirects `/app` and `/app/*` to real admin SPA paths | Backend contracts are unchanged; Remix now acts as a safe router shim rather than placeholder UI |
 
 ### 7.2 Missing Endpoints
 
@@ -620,3 +621,21 @@ All proxy endpoints require `?shop=<domain>` query parameter.
 | GraphQL product fetch (`admin.ts` L1005) | `2025-10` |
 
 Should be centralized in `config.ts`.
+
+---
+
+## 8. Shopify Remix Route Contract (Post-M5)
+
+The Remix shell now forwards embedded-app navigation to the admin SPA paths:
+
+| Remix Route | Behavior |
+|---|---|
+| `GET /app` | Redirects to `/bookings` |
+| `GET /app/bookings` | Redirects to `/bookings` |
+| `GET /app/inventory` | Redirects to `/inventory` |
+| `GET /app/products` | Redirects to `/inventory` |
+| `GET /app/locations` | Redirects to `/locations` |
+
+Implementation notes:
+- Redirects preserve incoming query parameters (for embedded context continuity) except Remix-internal `_data` and `index`.
+- Dev tunnel flow is unchanged (`shopify.web.toml` still runs `scripts/dev-shopify-admin.sh`, which serves `apps/admin` on port `3000`).

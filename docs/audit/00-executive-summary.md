@@ -8,21 +8,21 @@
 
 ## What's Broken (High-Level)
 
-The admin dashboard (`apps/admin/`) is a **standalone Vite+React SPA** served via Cloudflare Pages, embedded inside the Shopify admin iframe. While core data flows (booking listing, dashboard stats, inventory management) **do function** when the backend is reachable and authenticated, a significant number of **UI elements are visual stubs with no wired handlers**, several **filters on the Bookings page are non-functional**, and key administrative workflows like **manual booking creation** and **booking management** were initially unimplemented (now addressed through M2/M3 implementation updates below).
+The admin dashboard (`apps/admin/`) is a **standalone Vite+React SPA** served via Cloudflare Pages, embedded inside the Shopify admin iframe. Core booking/dashboard/inventory flows are now implemented through M1-M5, and major UI dead-end stubs have been removed. The remaining higher-risk items are backend/platform hardening tasks (CORS scope, proxy signature enforcement, per-shop timezone persistence, and API version consistency).
 
-The Shopify Remix app (`apps/shopify/mexican-golf-cart/`) still contains **default template code** (e.g., "Generate a product" demo action on the index page) and its own route pages for Bookings/Inventory/Products/Locations are **all placeholder stubs** — the real admin UI is served from `apps/admin/` via Cloudflare Pages, not from Remix routes.
+The Shopify Remix app (`apps/shopify/mexican-golf-cart/`) previously contained **default template code** and placeholder route stubs. As of M5, those routes now redirect safely to the real admin SPA paths, and the template "Generate a product" demo behavior has been removed from the embedded app flow.
 
 ---
 
 ## Most Likely Reasons the Admin UI Appears Non-Functional
 
-1. **Dual-app confusion:** The Shopify Remix app defines nav links to `/app/bookings`, `/app/inventory`, etc., but these are **placeholder pages**. The _real_ admin UI is a separate Vite app deployed to Cloudflare Pages (`master.mexican-golf-cart-admin.pages.dev`). If a user lands on the Remix routes, they see empty stubs.
+1. **Dual-app confusion (historical):** The Shopify Remix app originally linked to `/app/*` placeholders while the real UI lived in the Vite SPA on Cloudflare Pages. M5 resolved this by redirecting Remix `/app/*` routes to real SPA paths.
 
-2. **Stub buttons with no handlers:** Multiple prominent buttons (Manual Booking, New Service, FAQ, Manage, filter dropdowns on Bookings page) render in the UI but have **no `onClick` handler or execute no logic**.
+2. **Stub buttons with no handlers (historical):** Manual Booking, New Service, FAQ, Manage, and Bookings filter controls were previously unwired; these were addressed in M1-M4.
 
-3. **Bookings page filters are cosmetic:** The filter bar in `Bookings.tsx` renders buttons labeled "Upcoming", "All services", "All types", "All statuses" but they are **static `<Button>` components with no state management, no filter application logic, and no API query parameter integration**. They are purely decorative.
+3. **Bookings page filters were cosmetic (historical):** M1 replaced cosmetic controls with server-side filter/query integration.
 
-4. **Search on Bookings page is client-side only:** The search field filters already-fetched bookings on `booking_token`, `location_code`, and `order_id` — it does **not** search by customer name/email because those fields aren't included in the client-side filter logic, despite the placeholder text saying "Filter by customer name or email".
+4. **Bookings search mismatch (historical):** M1 switched Bookings search to backend `search` query support including customer name/email fields.
 
 5. **SHOPIFY_API_SECRET is not in `wrangler.toml`:** It must be set as a Cloudflare secret. If not deployed correctly, all JWT verification and webhook HMAC checks will fail silently, causing 401 errors on every admin API call.
 
@@ -52,8 +52,8 @@ The Shopify Remix app (`apps/shopify/mexican-golf-cart/`) still contains **defau
 - **Low Risk:** CORS is set to `Access-Control-Allow-Origin: *` globally, which is overly permissive.
 
 ### UX Dead Ends
-- **High:** Remaining prominent dead-ends are now mostly in Shopify Remix placeholder/template routes (ISS-008/ISS-009).
-- **Low:** M1-M4 removed major admin dead-ends (Bookings filters/export/search/manual booking/manage/calendar and Dashboard FAQ/New service/location/service-label polish).
+- **Low:** M1-M5 removed the major dead-ends, including Remix template/placeholder routes (ISS-008/ISS-009).
+- **Low (remaining):** Security/timezone/API-version hardening work remains (M6 scope), but not UX dead-end stubs.
 
 ---
 
@@ -65,9 +65,9 @@ The application is a **three-part system**:
 
 2. **Vite React Admin SPA** (`apps/admin/`): The real admin dashboard, deployed to Cloudflare Pages. Embeds inside Shopify admin iframe. Uses App Bridge for session tokens, Polaris for UI. Talks to Worker via `VITE_WORKER_ADMIN_BASE_URL/admin/*`.
 
-3. **Shopify Remix App** (`apps/shopify/mexican-golf-cart/`): OAuth entry point and Shopify CLI host. During `shopify app dev`, it serves the Vite admin SPA via the `dev-shopify-admin.sh` script. Its own route pages are all placeholders.
+3. **Shopify Remix App** (`apps/shopify/mexican-golf-cart/`): OAuth entry point and Shopify CLI host. During `shopify app dev`, it serves the Vite admin SPA via the `dev-shopify-admin.sh` script. Legacy Remix `/app/*` routes now redirect to SPA routes to avoid dead-end placeholder UX.
 
-The admin SPA on the Dashboard page has **more advanced filter/search/export** functionality than the Bookings page, which lags behind significantly.
+Post-M1 through M5, the admin SPA now has aligned filter/search/export and management behavior across Dashboard/Bookings, with remaining priority work centered on security/timezone hardening rather than missing UI wiring.
 
 ---
 
@@ -124,6 +124,26 @@ Milestone 4 (Dashboard Polishing) has now also been implemented:
 
 Post-M4 validation re-run (2026-02-07):
 
+- `npx tsc -p worker/tsconfig.json`: **PASS**
+- `npm --workspace worker run test`: **PASS** (7 passed, 0 failed)
+- `npm --workspace apps/admin run lint`: **PASS with warning** (`apps/admin/src/pages/Agreement.tsx:353`, pre-existing `react-hooks/exhaustive-deps`)
+- `npm --workspace apps/admin run build`: **PASS**
+
+Milestone 5 (Shopify Remix Cleanup) has now also been implemented:
+
+- Removed template product-generation action from `apps/shopify/mexican-golf-cart/app/routes/app._index.tsx`.
+- Replaced Remix placeholder route components with redirects to real SPA paths:
+  - `/app/bookings` -> `/bookings`
+  - `/app/inventory` -> `/inventory`
+  - `/app/products` -> `/inventory`
+  - `/app/locations` -> `/locations`
+- Updated Remix `NavMenu` links to align with real SPA paths (`/`, `/bookings`, `/inventory`, `/locations`, `/agreement`).
+- Preserved dev tunnel behavior (`scripts/dev-shopify-admin.sh`) unchanged.
+
+Post-M5 validation re-run (2026-02-07):
+
+- `npm --workspace apps/shopify/mexican-golf-cart run lint`: **PASS with warning** (`extensions/rental-extension/assets/booking-widget.js:278`, pre-existing `no-unused-vars`)
+- `npm --workspace apps/shopify/mexican-golf-cart run build`: **PASS with warning** (pre-existing CSS minify warning from Polaris media query output)
 - `npx tsc -p worker/tsconfig.json`: **PASS**
 - `npm --workspace worker run test`: **PASS** (7 passed, 0 failed)
 - `npm --workspace apps/admin run lint`: **PASS with warning** (`apps/admin/src/pages/Agreement.tsx:353`, pre-existing `react-hooks/exhaustive-deps`)

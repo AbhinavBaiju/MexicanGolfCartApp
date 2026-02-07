@@ -8,6 +8,7 @@ Manual test checklist and automated test recommendations derived from the audit 
 - M2 (Manual booking creation) is implemented.
 - M3 (Booking management flow) is implemented.
 - M4 (Dashboard polishing) is implemented.
+- M5 (Shopify Remix cleanup) is implemented.
 
 Validation commands executed after M2:
 - `npx tsc -p worker/tsconfig.json` (pass)
@@ -38,6 +39,16 @@ Validation commands executed after M4 implementation (2026-02-07):
 - `npm --workspace apps/admin run build` (pass)
 
 M4 verification status: **implemented and validated** (no M1/M2/M3 regression found in automated reruns).
+
+Validation commands executed after M5 implementation (2026-02-07):
+- `npm --workspace apps/shopify/mexican-golf-cart run lint` (pass with pre-existing warning in `extensions/rental-extension/assets/booking-widget.js:278`)
+- `npm --workspace apps/shopify/mexican-golf-cart run build` (pass with pre-existing CSS minify warning from Polaris media query output)
+- `npx tsc -p worker/tsconfig.json` (pass)
+- `npm --workspace worker run test` (pass: 7 passed, 0 failed)
+- `npm --workspace apps/admin run lint` (pass with the same pre-existing warning in `apps/admin/src/pages/Agreement.tsx:353`)
+- `npm --workspace apps/admin run build` (pass)
+
+M5 verification status: **implemented and validated** (no M1/M2/M3/M4 regression found in automated reruns).
 
 ---
 
@@ -114,8 +125,8 @@ Organized by page/area. Each test case references the issue it validates.
 
 | # | Test Case | Steps | Expected Result | Issue Ref |
 |---|---|---|---|---|
-| M-31 | No template demo code | Navigate to Remix app index | No "Generate a product" button visible | ISS-008 |
-| M-32 | Remix routes cleaned up | Navigate to `/app/bookings` in Remix | Either redirects to admin SPA or shows real content | ISS-009 |
+| M-31 | No template demo code | Navigate to Remix `/app` route | Route redirects to `/bookings`; no "Generate a product" action appears | ISS-008 |
+| M-32 | Remix routes cleaned up | Navigate to `/app/bookings`, `/app/inventory`, `/app/products`, `/app/locations` | Routes redirect to `/bookings`, `/inventory`, `/inventory`, `/locations` respectively | ISS-009 |
 
 ---
 
@@ -184,6 +195,7 @@ After each issue fix, run these verification tests:
 | ISS-003 (Manage button) | M-09 + verify no impact on "Mark as Completed" |
 | ISS-004 (Search) | M-05, M-06 + verify existing `booking_token` search still works |
 | ISS-012 (Calendar counts) | M-17 + verify Dashboard stats unchanged |
+| ISS-008/ISS-009 (Remix cleanup) | M-31, M-32 + verify `NavMenu` links open real SPA paths |
 | ISS-014 (CORS) | M-27 + verify admin SPA still works from allowed origin |
 | ISS-015 (Proxy signatures) | M-28 + verify storefront widget still works through App Proxy |
 | ISS-021 (WAITLIST) | M-07 + verify other status tabs unaffected |

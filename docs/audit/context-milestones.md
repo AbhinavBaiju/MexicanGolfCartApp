@@ -7,6 +7,7 @@
 - Issue IDs with evidence and owners: [docs/audit/03-issues-register.md](docs/audit/03-issues-register.md)
 - API surface and gaps (admin, proxy, webhooks): [docs/audit/04-endpoints-and-data-contracts.md](docs/audit/04-endpoints-and-data-contracts.md)
 - Manual test checklist and test priorities: [docs/audit/05-test-and-verification-plan.md](docs/audit/05-test-and-verification-plan.md)
+- Milestone implementation handoff log: [docs/audit/06-m1-implementation-log.md](docs/audit/06-m1-implementation-log.md)
 
 ## System Snapshot (from the docs)
 - Stack: Vite+React+Polaris admin SPA (Cloudflare Pages), Cloudflare Worker + D1 backend, Shopify Remix shell for OAuth/tunnel, App Bridge v4 for auth.
@@ -25,11 +26,13 @@ M1 – Bookings Page Parity (ISS-001/004/006/011/021)
 - Wire sort/export handlers (reuse Dashboard `handleExport`), remove or implement Up-arrow toggle.
 - Decide on WAITLIST: either add migration to allow status or drop the tab.
 - Replace "Services availabilities" placeholder with real view or remove the tab.
+Status: Completed on 2026-02-08. See [docs/audit/06-m1-implementation-log.md](docs/audit/06-m1-implementation-log.md).
 
 M2 – Manual Booking Creation (ISS-002)
 - Backend: add `POST /admin/bookings` to perform hold+confirm with capacity checks (reuse proxy hold logic) and create booking_items/days.
 - Frontend: add modal/form from "+ Manual booking" button; support product/variant selection, dates, location, quantity; show success/error toasts.
 - Ensure atomic inventory updates (fail-fast SQL) and store-timezone validation.
+Status: Next milestone to execute.
 
 M3 – Booking Management Flow (ISS-003/017/013/012)
 - Add booking detail view (modal or route) using `GET /admin/bookings/:token`; wire BookingCard "Manage" button.

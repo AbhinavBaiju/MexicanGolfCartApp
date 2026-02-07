@@ -70,3 +70,18 @@ The application is a **three-part system**:
 3. **Shopify Remix App** (`apps/shopify/mexican-golf-cart/`): OAuth entry point and Shopify CLI host. During `shopify app dev`, it serves the Vite admin SPA via the `dev-shopify-admin.sh` script. Its own route pages are all placeholders.
 
 The admin SPA on the Dashboard page has **more advanced filter/search/export** functionality than the Bookings page, which lags behind significantly.
+
+---
+
+## Implementation Status Update (2026-02-08)
+
+Milestone 1 (Bookings Page Parity) has been implemented in the admin SPA:
+
+- `apps/admin/src/pages/Bookings.tsx` now uses server-side query params for booking search/filter/sort.
+- Search now sends backend `search` and supports customer name/email via worker-side search.
+- Former stub controls now execute logic: Upcoming, All services, All types, All statuses, sort direction toggle, and Export.
+- Bookings export now generates CSV for currently loaded results.
+- WAITLIST tab was removed (schema does not allow `WAITLIST` status).
+- "Services availabilities" placeholder tab was removed (dead-end UI removed).
+
+Milestone 2 (Manual Booking Creation) is now the next implementation target.

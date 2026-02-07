@@ -20,6 +20,7 @@ import { BookingsCalendar } from '../components/BookingsCalendar';
 import { useAuthenticatedFetch } from '../api';
 import type { Booking } from '../components/BookingCard';
 import { BookingCard } from '../components/BookingCard';
+import { showShopifyToast } from '../utils/shopifyToast';
 
 const DASHBOARD_STYLES = `
     .full-height-card-wrapper {
@@ -87,6 +88,15 @@ interface ProductConfigResponse {
 
 interface LocationsResponse {
     locations?: Array<{ code: string; name: string }>;
+}
+
+interface BookingCompleteResponse {
+    ok?: boolean;
+    error?: string;
+    fulfillment?: {
+        success?: boolean;
+        message?: string;
+    };
 }
 
 interface FilterOption {
@@ -362,12 +372,35 @@ export default function Dashboard() {
         void loadFilteredBookings(debouncedSearch);
     }, [debouncedSearch, loadFilteredBookings]);
 
-    const handleMarkComplete = async (token: string) => {
-        const res = await fetch(`/bookings/${token}/complete`, { method: 'POST' });
-        if (res.ok) {
+    const handleMarkComplete = async (token: string): Promise<boolean> => {
+        try {
+            const response = await fetch(`/bookings/${token}/complete`, { method: 'POST' });
+            const responseBody = (await response.json().catch(() => null)) as BookingCompleteResponse | null;
+            if (!response.ok || !responseBody?.ok) {
+                const message = responseBody?.error || `Failed to complete booking (${response.status})`;
+                showShopifyToast(message, true);
+                return false;
+            }
+
             await Promise.all([loadData(), loadFilteredBookings(debouncedSearch)]);
-        } else {
-            console.error('Failed to complete');
+
+            if (responseBody.fulfillment?.success === false) {
+                const detail = responseBody.fulfillment.message?.trim();
+                showShopifyToast(
+                    detail
+                        ? `Booking released, but Shopify fulfillment failed: ${detail}`
+                        : 'Booking released, but Shopify fulfillment failed.',
+                    true
+                );
+                return true;
+            }
+
+            showShopifyToast('Booking marked as completed.');
+            return true;
+        } catch (completeError) {
+            const message = completeError instanceof Error ? completeError.message : 'Failed to complete booking';
+            showShopifyToast(message, true);
+            return false;
         }
     };
 

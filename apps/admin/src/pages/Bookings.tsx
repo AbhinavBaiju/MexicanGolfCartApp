@@ -21,6 +21,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { BookingCard, type Booking } from '../components/BookingCard';
 import { BookingsCalendar } from '../components/BookingsCalendar';
 import { SearchIcon, ExportIcon, ArrowUpIcon, PlusIcon } from '@shopify/polaris-icons';
+import { showShopifyToast } from '../utils/shopifyToast';
 
 interface FilterOption {
     label: string;
@@ -70,6 +71,15 @@ interface ManualBookingCreateResponse {
     error?: string;
 }
 
+interface BookingCompleteResponse {
+    ok?: boolean;
+    error?: string;
+    fulfillment?: {
+        success?: boolean;
+        message?: string;
+    };
+}
+
 interface ManualProductCatalog {
     product_id: number;
     title: string;
@@ -93,16 +103,6 @@ interface ManualBookingFormState {
     deliveryAddress: string;
 }
 
-interface ShopifyToast {
-    show: (message: string, options?: { isError?: boolean }) => void;
-}
-
-interface ShopifyWindow {
-    shopify?: {
-        toast?: ShopifyToast;
-    };
-}
-
 const DEFAULT_MANUAL_FORM: ManualBookingFormState = {
     customerName: '',
     customerEmail: '',
@@ -115,15 +115,6 @@ const DEFAULT_MANUAL_FORM: ManualBookingFormState = {
     fulfillmentType: 'Pick Up',
     deliveryAddress: '',
 };
-
-function showToast(message: string, isError = false): void {
-    if (typeof window === 'undefined') {
-        return;
-    }
-
-    const shopifyWindow = window as Window & ShopifyWindow;
-    shopifyWindow.shopify?.toast?.show(message, isError ? { isError: true } : undefined);
-}
 
 const TYPE_OPTIONS: FilterOption[] = [
     { label: 'All types', value: 'all' },
@@ -578,7 +569,7 @@ export default function Bookings() {
         ) {
             const message = 'Please complete all required fields.';
             setManualBookingError(message);
-            showToast(message, true);
+            showShopifyToast(message, true);
             return;
         }
 
@@ -595,14 +586,14 @@ export default function Bookings() {
         ) {
             const message = 'Quantity, product, and variant must be valid values.';
             setManualBookingError(message);
-            showToast(message, true);
+            showShopifyToast(message, true);
             return;
         }
 
         if (manualForm.fulfillmentType === 'Delivery' && manualForm.deliveryAddress.trim().length === 0) {
             const message = 'Delivery address is required for delivery bookings.';
             setManualBookingError(message);
-            showToast(message, true);
+            showShopifyToast(message, true);
             return;
         }
 
@@ -647,23 +638,46 @@ export default function Bookings() {
                 productId: current.productId,
                 variantId: current.variantId,
             }));
-            showToast(`Manual booking created (${responseBody.booking_token?.slice(0, 8) ?? 'token'})`);
+            showShopifyToast(`Manual booking created (${responseBody.booking_token?.slice(0, 8) ?? 'token'})`);
             await loadBookings(debouncedSearch);
         } catch (submitError) {
             const message = submitError instanceof Error ? submitError.message : 'Failed to create booking';
             setManualBookingError(message);
-            showToast(message, true);
+            showShopifyToast(message, true);
         } finally {
             setManualBookingSubmitting(false);
         }
     };
 
-    const handleMarkComplete = async (token: string) => {
-        const response = await fetch(`/bookings/${token}/complete`, { method: 'POST' });
-        if (response.ok) {
+    const handleMarkComplete = async (token: string): Promise<boolean> => {
+        try {
+            const response = await fetch(`/bookings/${token}/complete`, { method: 'POST' });
+            const responseBody = (await response.json().catch(() => null)) as BookingCompleteResponse | null;
+            if (!response.ok || !responseBody?.ok) {
+                const message = responseBody?.error || `Failed to complete booking (${response.status})`;
+                showShopifyToast(message, true);
+                return false;
+            }
+
             await loadBookings(debouncedSearch);
-        } else {
-            console.error('Failed to complete booking');
+
+            if (responseBody.fulfillment?.success === false) {
+                const detail = responseBody.fulfillment.message?.trim();
+                showShopifyToast(
+                    detail
+                        ? `Booking released, but Shopify fulfillment failed: ${detail}`
+                        : 'Booking released, but Shopify fulfillment failed.',
+                    true
+                );
+                return true;
+            }
+
+            showShopifyToast('Booking marked as completed.');
+            return true;
+        } catch (completeError) {
+            const message = completeError instanceof Error ? completeError.message : 'Failed to complete booking';
+            showShopifyToast(message, true);
+            return false;
         }
     };
 

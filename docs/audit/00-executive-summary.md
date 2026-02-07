@@ -8,7 +8,7 @@
 
 ## What's Broken (High-Level)
 
-The admin dashboard (`apps/admin/`) is a **standalone Vite+React SPA** served via Cloudflare Pages, embedded inside the Shopify admin iframe. While core data flows (booking listing, dashboard stats, inventory management) **do function** when the backend is reachable and authenticated, a significant number of **UI elements are visual stubs with no wired handlers**, several **filters on the Bookings page are non-functional**, and key administrative workflows like **manual booking creation** and **booking management** are entirely unimplemented.
+The admin dashboard (`apps/admin/`) is a **standalone Vite+React SPA** served via Cloudflare Pages, embedded inside the Shopify admin iframe. While core data flows (booking listing, dashboard stats, inventory management) **do function** when the backend is reachable and authenticated, a significant number of **UI elements are visual stubs with no wired handlers**, several **filters on the Bookings page are non-functional**, and key administrative workflows like **manual booking creation** and **booking management** were initially unimplemented (now addressed through M2/M3 implementation updates below).
 
 The Shopify Remix app (`apps/shopify/mexican-golf-cart/`) still contains **default template code** (e.g., "Generate a product" demo action on the index page) and its own route pages for Bookings/Inventory/Products/Locations are **all placeholder stubs** — the real admin UI is served from `apps/admin/` via Cloudflare Pages, not from Remix routes.
 
@@ -43,7 +43,7 @@ The Shopify Remix app (`apps/shopify/mexican-golf-cart/`) still contains **defau
 ## Risk Assessment
 
 ### Data Integrity
-- **Medium Risk:** The "Mark as Completed" action transitions bookings to `RELEASED` status and attempts Shopify order fulfillment. This works correctly but lacks a confirmation of _success_ feedback to the user beyond the modal closing.
+- **Medium Risk:** The "Mark as Completed" action transitions bookings to `RELEASED` status and attempts Shopify order fulfillment. M3 added explicit success/error feedback, but backend still sets `RELEASED` even when fulfillment fails.
 - **Low Risk:** Inventory capacity overrides use guarded SQL updates preventing overselling.
 
 ### Auth/Security
@@ -52,10 +52,8 @@ The Shopify Remix app (`apps/shopify/mexican-golf-cart/`) still contains **defau
 - **Low Risk:** CORS is set to `Access-Control-Allow-Origin: *` globally, which is overly permissive.
 
 ### UX Dead Ends
-- **High:** Multiple prominent buttons (Manual Booking, Manage, New Service, FAQ, Bookings page filters) lead to dead ends.
-- **Medium:** The Bookings page search says "Filter by customer name or email" but only searches booking_token, location_code, and order_id client-side.
-- **Medium:** "Services availabilities" tab displays "coming soon" placeholder.
-- **Low:** Calendar counts bookings by `start_date` only; bookings spanning multiple days appear only on the start day.
+- **High:** Remaining prominent stubs are mostly outside M3 scope (Dashboard "FAQ", Dashboard "New service", Remix placeholder routes).
+- **Low:** M1/M3 removed major Bookings dead-ends (filters/export/search/manual booking/manage and calendar span counting are now wired).
 
 ---
 
@@ -98,4 +96,17 @@ Post-implementation re-audit (2026-02-07):
 - No M2 scope gaps or M1 regressions were found.
 - Validation re-run passed (`tsc`, worker tests, admin lint/build), with one pre-existing lint warning in `apps/admin/src/pages/Agreement.tsx`.
 
-Milestone 3 (Booking Management Flow) is now the next implementation target.
+Milestone 3 (Booking Management Flow) has now also been implemented:
+
+- `BookingCard` now wires `Manage` to a booking detail modal that loads live data from `GET /admin/bookings/:token`.
+- Completion flow now shows App Bridge toasts for success and error outcomes in both Bookings and Dashboard views.
+- Completion flow now explicitly surfaces Shopify fulfillment failure (`fulfillment.success=false`) as an error toast while still refreshing booking state from backend.
+- Booking date rendering now uses timezone-safe date parsing for `YYYY-MM-DD` values.
+- `BookingsCalendar` now counts bookings across full day spans (`start_date` through `end_date`) and uses timezone-safe date keys.
+
+Post-M3 validation re-run (2026-02-07):
+
+- `npx tsc -p worker/tsconfig.json`: **PASS**
+- `npm --workspace worker run test`: **PASS** (7 passed, 0 failed)
+- `npm --workspace apps/admin run lint`: **PASS with warning** (`apps/admin/src/pages/Agreement.tsx:353`, pre-existing `react-hooks/exhaustive-deps`)
+- `npm --workspace apps/admin run build`: **PASS**

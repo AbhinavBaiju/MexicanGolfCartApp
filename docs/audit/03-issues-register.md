@@ -59,6 +59,11 @@ Each entry represents a distinct issue found during the audit. Issues are ordere
 | **What's Needed to Fix** | 1) Create a booking detail modal or page. 2) Wire the Manage button to navigate/open it. 3) Backend `GET /admin/bookings/:token` already exists and returns full detail including items and days. |
 | **Owner Type** | Frontend |
 
+**Implementation Update (2026-02-07):** Resolved in M3.
+- `apps/admin/src/components/BookingCard.tsx` now wires the `Manage` button to open a booking detail modal.
+- The modal loads authoritative booking data from `GET /admin/bookings/:token` on demand.
+- Detail view now renders booking header fields, booking items, and booking-day rows from backend response.
+
 ---
 
 ## ISS-004: Bookings Page Search Claims Customer Name/Email but Only Filters on Token/Location/Order
@@ -212,6 +217,11 @@ Each entry represents a distinct issue found during the audit. Issues are ordere
 | **What's Needed to Fix** | Change filter to: `b.start_date <= dateStr && b.end_date >= dateStr` (accounting for string comparison of YYYY-MM-DD format). |
 | **Owner Type** | Frontend |
 
+**Implementation Update (2026-02-07):** Resolved in M3.
+- `apps/admin/src/components/BookingsCalendar.tsx` now counts daily activity using inclusive date-range overlap (`start_date` through `end_date`) instead of start-date-only matching.
+- Month badge count now uses range overlap for bookings active in the visible month.
+- Calendar date-key generation now avoids UTC `toISOString()` drift.
+
 ---
 
 ## ISS-013: Date Formatting May Shift By One Day Due to Timezone
@@ -228,6 +238,10 @@ Each entry represents a distinct issue found during the audit. Issues are ordere
 | **Impact** | Dates may appear off by one day. The store is in `America/Mazatlan` timezone. |
 | **What's Needed to Fix** | Parse dates by splitting "YYYY-MM-DD" into parts and constructing with explicit year/month/day, or append `T12:00:00` to avoid midnight edge cases. |
 | **Owner Type** | Frontend |
+
+**Implementation Update (2026-02-07):** Resolved in M3.
+- Added `apps/admin/src/utils/date.ts` with timezone-safe formatting for date-only values.
+- `apps/admin/src/components/BookingCard.tsx` now uses `formatDateForDisplay(...)` instead of `new Date(dateStr)` parsing.
 
 ---
 
@@ -296,6 +310,10 @@ Each entry represents a distinct issue found during the audit. Issues are ordere
 | **Impact** | Poor UX — user doesn't know if the action succeeded or failed without checking the booking list. |
 | **What's Needed to Fix** | Use App Bridge `shopify.toast.show()` for success/error feedback. |
 | **Owner Type** | Frontend |
+
+**Implementation Update (2026-02-07):** Resolved in M3.
+- Completion handlers in both `apps/admin/src/pages/Bookings.tsx` and `apps/admin/src/pages/Dashboard.tsx` now show App Bridge toast feedback for success and failure.
+- Fulfillment failure (`fulfillment.success === false`) is now explicitly surfaced to users via error toast while list/dashboard data is refreshed from backend.
 
 ---
 

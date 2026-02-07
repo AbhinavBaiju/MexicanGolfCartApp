@@ -6,6 +6,7 @@ Manual test checklist and automated test recommendations derived from the audit 
 
 - M1 (Bookings parity) is implemented.
 - M2 (Manual booking creation) is implemented.
+- M3 (Booking management flow) is implemented.
 
 Validation commands executed after M2:
 - `npx tsc -p worker/tsconfig.json` (pass)
@@ -20,6 +21,14 @@ Re-validation executed on 2026-02-07 (post-audit):
 - `npm --workspace apps/admin run build` (pass)
 
 M2 verification status: **signed off** (no M2 delta findings).
+
+Validation commands executed after M3 implementation (2026-02-07):
+- `npx tsc -p worker/tsconfig.json` (pass)
+- `npm --workspace worker run test` (pass: 7 passed, 0 failed)
+- `npm --workspace apps/admin run lint` (pass with the same pre-existing warning in `apps/admin/src/pages/Agreement.tsx:353`)
+- `npm --workspace apps/admin run build` (pass)
+
+M3 verification status: **implemented and validated** (no M1/M2 regression found in automated reruns).
 
 ---
 
@@ -129,7 +138,7 @@ Current test files found:
 
 | Test File | What to Test | Why |
 |---|---|---|
-| `BookingCard.test.tsx` | "Manage" button fires callback | Prevents regression once the handler is implemented. |
+| `BookingCard.test.tsx` | "Manage" button opens detail modal and fetches `/admin/bookings/:token` | Prevents regression in the M3 booking management flow. |
 | `BookingCard.test.tsx` | Date formatting for timezone safety | Verify dates don't shift by one day. |
 | `BookingsCalendar.test.tsx` | Multi-day booking counting | Verify all days in range show counts. |
 | `Bookings.test.tsx` | Filter buttons render with handlers | Verify each filter button has an `onClick`. |

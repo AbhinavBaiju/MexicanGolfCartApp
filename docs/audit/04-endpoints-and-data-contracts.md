@@ -232,6 +232,7 @@ All prefixed with `/admin`. Auth: JWT session token via `Authorization: Bearer <
   ]
 }
 ```
+- **Audit Status (2026-02-07):** Wired in admin UI during M3; `BookingCard` `Manage` now opens a detail modal backed by this endpoint.
 
 #### `POST /admin/bookings`
 - **Handler:** `handleBookingsPost` (`worker/src/admin.ts`)
@@ -290,9 +291,10 @@ All prefixed with `/admin`. Auth: JWT session token via `Authorization: Bearer <
   1. Calls Shopify Fulfillment API (`2025-10`) to fulfill the order.
   2. Updates booking status to `RELEASED`.
 - **⚠️ Issue:** Sets status to `RELEASED` even if Shopify fulfillment fails (L937–940). The `fulfillment.success` flag in the response may be `false`.
+- **Audit Status (2026-02-07):** M3 frontend now shows explicit success/error toast feedback and handles `fulfillment.success=false` as a surfaced failure state for admins.
 
 #### Missing: `PATCH /admin/bookings/:token` (edit)
-- **Status:** Not implemented. The "Manage" button in the UI has no backend to call.
+- **Status:** Not implemented. Read-only management is now available via `GET /admin/bookings/:token`, but edit mutation support is still missing.
 
 ### 2.6 Dashboard
 
@@ -591,7 +593,7 @@ All proxy endpoints require `?shop=<domain>` query parameter.
 | **Bookings search** | Client-side filter on `booking_token`, `location_code`, `order_id` | Server-side `search` param also searches `customer_name`, `customer_email` |
 | **Service labels** | Displays `"Service ${product_id}"` | Could return product titles if joined with Shopify data |
 | **WAITLIST status** | Bookings tab sends `?status=WAITLIST` | Backend accepts it but DB rejects the value on write |
-| **Calendar booking count** | Counts by `start_date` only | Backend returns `start_date` + `end_date` but no day-level aggregation endpoint exists |
+| **Calendar booking count** | M3 now counts full booking spans on the client | Backend returns `start_date` + `end_date`; no dedicated day-aggregation endpoint exists yet |
 
 ### 7.2 Missing Endpoints
 
@@ -606,7 +608,7 @@ All proxy endpoints require `?shop=<domain>` query parameter.
 | Endpoint | Issue |
 |---|---|
 | `GET /admin/products` | Returns `product_id` (numeric) but no `title`. Must be cross-referenced with `/shopify-products`. |
-| `POST /admin/bookings/:token/complete` | Sets booking to `RELEASED` regardless of fulfillment success. Response includes `fulfillment.success: false` but DB state is already changed. |
+| `POST /admin/bookings/:token/complete` | Sets booking to `RELEASED` regardless of fulfillment success. Response includes `fulfillment.success: false` but DB state is already changed (frontend now surfaces this with explicit error toast). |
 | `GET /admin/dashboard` | `productStats` returns `product_id` + `count` but no product title — same label problem as service filter. |
 
 ### 7.4 API Version Inconsistency

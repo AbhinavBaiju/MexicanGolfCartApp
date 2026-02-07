@@ -3,6 +3,7 @@ import { ViewIcon } from '@shopify/polaris-icons';
 import { useState } from 'react';
 import { useAuthenticatedFetch } from '../api';
 import { SignedAgreementPdfPreview, type NormalizedRect } from './SignedAgreementPdfPreview';
+import { formatDateForDisplay } from '../utils/date';
 
 export interface Booking {
     booking_token: string;
@@ -52,9 +53,34 @@ interface SignedAgreementDetailResponse {
     agreement: AgreementData;
 }
 
+interface BookingDetail extends Booking {
+    id: number;
+    expires_at?: string | null;
+}
+
+interface BookingDetailItem {
+    product_id: number;
+    variant_id?: number | null;
+    qty: number;
+}
+
+interface BookingDetailDay {
+    product_id: number;
+    date: string;
+    qty: number;
+}
+
+interface BookingDetailResponse {
+    ok?: boolean;
+    error?: string;
+    booking?: BookingDetail;
+    items?: BookingDetailItem[];
+    days?: BookingDetailDay[];
+}
+
 interface BookingCardProps {
     booking: Booking;
-    onMarkComplete?: (token: string) => Promise<void>;
+    onMarkComplete?: (token: string) => Promise<boolean>;
 }
 
 export function BookingCard({ booking, onMarkComplete }: BookingCardProps) {
@@ -67,23 +93,30 @@ export function BookingCard({ booking, onMarkComplete }: BookingCardProps) {
     const [agreementError, setAgreementError] = useState<string | null>(null);
     const [signedAgreement, setSignedAgreement] = useState<SignedAgreementDetail | null>(null);
     const [agreementDoc, setAgreementDoc] = useState<AgreementData | null>(null);
+    const [manageModalOpen, setManageModalOpen] = useState(false);
+    const [manageLoading, setManageLoading] = useState(false);
+    const [manageError, setManageError] = useState<string | null>(null);
+    const [manageBooking, setManageBooking] = useState<BookingDetail | null>(null);
+    const [manageItems, setManageItems] = useState<BookingDetailItem[]>([]);
+    const [manageDays, setManageDays] = useState<BookingDetailDay[]>([]);
 
-    let badgeTone = 'info';
-    if (booking.status === 'CONFIRMED') badgeTone = 'success';
-    if (booking.status === 'EXPIRED' || booking.status === 'RELEASED' || booking.status === 'CANCELLED') badgeTone = 'critical';
-
-    // Format dates
-    const formatDate = (dateStr: string) => {
-        const d = new Date(dateStr);
-        return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+    const getBadgeTone = (status: string): 'info' | 'success' | 'critical' => {
+        if (status === 'CONFIRMED') return 'success';
+        if (status === 'EXPIRED' || status === 'RELEASED' || status === 'CANCELLED') return 'critical';
+        return 'info';
     };
+    const badgeTone = getBadgeTone(booking.status);
 
     const handleConfirmComplete = async () => {
         if (!onMarkComplete) return;
         setCompleting(true);
         try {
-            await onMarkComplete(booking.booking_token);
-            setModalOpen(false);
+            const completed = await onMarkComplete(booking.booking_token);
+            if (completed) {
+                setModalOpen(false);
+            }
+        } catch (e: unknown) {
+            console.error('Failed to complete booking', e);
         } finally {
             setCompleting(false);
         }
@@ -114,6 +147,32 @@ export function BookingCard({ booking, onMarkComplete }: BookingCardProps) {
             setAgreementError(e instanceof Error ? e.message : 'Failed to load signed agreement.');
         } finally {
             setAgreementLoading(false);
+        }
+    };
+
+    const openManageModal = async () => {
+        setManageModalOpen(true);
+        setManageLoading(true);
+        setManageError(null);
+        setManageBooking(null);
+        setManageItems([]);
+        setManageDays([]);
+
+        try {
+            const response = await fetch(`/bookings/${booking.booking_token}`);
+            const data = (await response.json().catch(() => null)) as BookingDetailResponse | null;
+            if (!response.ok || !data?.ok || !data.booking) {
+                const message = data?.error || 'Failed to load booking details.';
+                throw new Error(message);
+            }
+
+            setManageBooking(data.booking);
+            setManageItems(Array.isArray(data.items) ? data.items : []);
+            setManageDays(Array.isArray(data.days) ? data.days : []);
+        } catch (e: unknown) {
+            setManageError(e instanceof Error ? e.message : 'Failed to load booking details.');
+        } finally {
+            setManageLoading(false);
         }
     };
 
@@ -183,7 +242,7 @@ export function BookingCard({ booking, onMarkComplete }: BookingCardProps) {
                             >
                                 View agreement
                             </Button>
-                            <Button variant="secondary">Manage</Button>
+                            <Button variant="secondary" onClick={openManageModal}>Manage</Button>
                             <Button
                                 variant="primary"
                                 tone="critical"
@@ -196,7 +255,7 @@ export function BookingCard({ booking, onMarkComplete }: BookingCardProps) {
 
                         <div style={{ backgroundColor: '#f1f2f3', padding: '8px 12px', borderRadius: '6px' }}>
                             <Text as="span" fontWeight="bold">
-                                {formatDate(booking.start_date)} to {formatDate(booking.end_date)}
+                                {formatDateForDisplay(booking.start_date)} to {formatDateForDisplay(booking.end_date)}
                             </Text>
                         </div>
                         <Text as="p" tone="subdued" alignment="end">
@@ -227,6 +286,122 @@ export function BookingCard({ booking, onMarkComplete }: BookingCardProps) {
                     <Text as="p">
                         Are you sure you want to mark this booking as completed? This will update the status to Fulfilled.
                     </Text>
+                </Modal.Section>
+            </Modal>
+
+            <Modal
+                open={manageModalOpen}
+                onClose={() => setManageModalOpen(false)}
+                title={`Manage Booking ${booking.booking_token.substring(0, 8)}`}
+                size="large"
+            >
+                <Modal.Section>
+                    <BlockStack gap="300">
+                        {manageError && <InlineError message={manageError} fieldID="booking-manage-error" />}
+
+                        {manageLoading ? (
+                            <InlineStack gap="200" align="start" blockAlign="center">
+                                <Spinner size="small" />
+                                <Text as="span">Loading booking details…</Text>
+                            </InlineStack>
+                        ) : manageBooking ? (
+                            <BlockStack gap="400">
+                                <Box padding="400" background="bg-surface-secondary" borderRadius="200">
+                                    <InlineGrid columns={{ xs: 1, sm: 2, md: 3 }} gap="300">
+                                        <BlockStack gap="100">
+                                            <Text as="p" variant="headingXs" tone="subdued">Status</Text>
+                                            <Badge tone={getBadgeTone(manageBooking.status)}>{manageBooking.status}</Badge>
+                                        </BlockStack>
+                                        <BlockStack gap="100">
+                                            <Text as="p" variant="headingXs" tone="subdued">Order ID</Text>
+                                            <Text as="p" variant="bodyMd">{manageBooking.order_id || 'N/A'}</Text>
+                                        </BlockStack>
+                                        <BlockStack gap="100">
+                                            <Text as="p" variant="headingXs" tone="subdued">Location</Text>
+                                            <Text as="p" variant="bodyMd">{manageBooking.location_code}</Text>
+                                        </BlockStack>
+                                        <BlockStack gap="100">
+                                            <Text as="p" variant="headingXs" tone="subdued">Start Date</Text>
+                                            <Text as="p" variant="bodyMd">{formatDateForDisplay(manageBooking.start_date)}</Text>
+                                        </BlockStack>
+                                        <BlockStack gap="100">
+                                            <Text as="p" variant="headingXs" tone="subdued">End Date</Text>
+                                            <Text as="p" variant="bodyMd">{formatDateForDisplay(manageBooking.end_date)}</Text>
+                                        </BlockStack>
+                                        <BlockStack gap="100">
+                                            <Text as="p" variant="headingXs" tone="subdued">Fulfillment</Text>
+                                            <Text as="p" variant="bodyMd">
+                                                {manageBooking.fulfillment_type || 'Pick Up'}
+                                                {manageBooking.delivery_address ? ` • ${manageBooking.delivery_address}` : ''}
+                                            </Text>
+                                        </BlockStack>
+                                        <BlockStack gap="100">
+                                            <Text as="p" variant="headingXs" tone="subdued">Customer</Text>
+                                            <Text as="p" variant="bodyMd">{manageBooking.customer_name || 'N/A'}</Text>
+                                        </BlockStack>
+                                        <BlockStack gap="100">
+                                            <Text as="p" variant="headingXs" tone="subdued">Email</Text>
+                                            <Text as="p" variant="bodyMd" breakWord>{manageBooking.customer_email || 'N/A'}</Text>
+                                        </BlockStack>
+                                        {manageBooking.expires_at ? (
+                                            <BlockStack gap="100">
+                                                <Text as="p" variant="headingXs" tone="subdued">Expires At</Text>
+                                                <Text as="p" variant="bodyMd">{new Date(manageBooking.expires_at).toLocaleString()}</Text>
+                                            </BlockStack>
+                                        ) : null}
+                                    </InlineGrid>
+                                </Box>
+
+                                <BlockStack gap="200">
+                                    <Text as="h4" variant="headingSm">Booked Items</Text>
+                                    {manageItems.length === 0 ? (
+                                        <Text as="p" tone="subdued">No items found for this booking.</Text>
+                                    ) : (
+                                        <BlockStack gap="150">
+                                            {manageItems.map((item, index) => (
+                                                <Text
+                                                    key={`${item.product_id}-${item.variant_id ?? 'none'}-${index}`}
+                                                    as="p"
+                                                    variant="bodyMd"
+                                                >
+                                                    Product {item.product_id}
+                                                    {' • '}
+                                                    Variant {item.variant_id ?? 'N/A'}
+                                                    {' • '}
+                                                    Qty {item.qty}
+                                                </Text>
+                                            ))}
+                                        </BlockStack>
+                                    )}
+                                </BlockStack>
+
+                                <BlockStack gap="200">
+                                    <Text as="h4" variant="headingSm">Reserved Days</Text>
+                                    {manageDays.length === 0 ? (
+                                        <Text as="p" tone="subdued">No day-level reservations found.</Text>
+                                    ) : (
+                                        <BlockStack gap="150">
+                                            {manageDays.map((day, index) => (
+                                                <Text
+                                                    key={`${day.date}-${day.product_id}-${index}`}
+                                                    as="p"
+                                                    variant="bodyMd"
+                                                >
+                                                    {formatDateForDisplay(day.date)}
+                                                    {' • '}
+                                                    Product {day.product_id}
+                                                    {' • '}
+                                                    Qty {day.qty}
+                                                </Text>
+                                            ))}
+                                        </BlockStack>
+                                    )}
+                                </BlockStack>
+                            </BlockStack>
+                        ) : (
+                            <Text as="p" tone="subdued">No booking details available.</Text>
+                        )}
+                    </BlockStack>
                 </Modal.Section>
             </Modal>
 

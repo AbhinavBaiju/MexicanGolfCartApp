@@ -2,9 +2,22 @@ import { Card, Text, Box, InlineStack, Button, Badge } from '@shopify/polaris';
 import { ArrowLeftIcon, ArrowRightIcon } from '@shopify/polaris-icons';
 import { useState, useMemo } from 'react';
 import type { Booking } from './BookingCard';
+import { toDateIndex, toLocalYyyyMmDd } from '../utils/date';
 
 interface BookingsCalendarProps {
     bookings?: Booking[];
+}
+
+interface BookingRange {
+    start: number;
+    end: number;
+}
+
+interface CalendarDay {
+    day: number;
+    month: 'prev' | 'curr' | 'next';
+    date: Date;
+    count: number;
 }
 
 export function BookingsCalendar({ bookings = [] }: BookingsCalendarProps) {
@@ -12,53 +25,76 @@ export function BookingsCalendar({ bookings = [] }: BookingsCalendarProps) {
 
     const monthName = currentDate.toLocaleString('default', { month: 'long' });
     const year = currentDate.getFullYear();
+    const month = currentDate.getMonth();
 
-    const calendarData = useMemo(() => {
-        const days = [];
-        const firstDayOfMonth = new Date(year, currentDate.getMonth(), 1);
-        const lastDayOfMonth = new Date(year, currentDate.getMonth() + 1, 0);
+    const bookingRanges = useMemo<BookingRange[]>(() => {
+        const ranges: BookingRange[] = [];
+        for (const booking of bookings) {
+            const start = toDateIndex(booking.start_date);
+            const end = toDateIndex(booking.end_date);
+            if (start === null || end === null || start > end) {
+                continue;
+            }
+            ranges.push({ start, end });
+        }
+        return ranges;
+    }, [bookings]);
+
+    const calendarData = useMemo<CalendarDay[]>(() => {
+        const days: Array<{ day: number; month: 'prev' | 'curr' | 'next'; date: Date }> = [];
+        const firstDayOfMonth = new Date(year, month, 1);
+        const lastDayOfMonth = new Date(year, month + 1, 0);
 
         // Days from previous month to fill start
         // 0 = Sunday, 1 = Monday, ...
         const startDay = firstDayOfMonth.getDay();
         for (let i = startDay - 1; i >= 0; i--) {
-            const d = new Date(year, currentDate.getMonth(), -i);
+            const d = new Date(year, month, -i);
             days.push({ day: d.getDate(), month: 'prev', date: d });
         }
 
         // Current month
         for (let i = 1; i <= lastDayOfMonth.getDate(); i++) {
-            const d = new Date(year, currentDate.getMonth(), i);
+            const d = new Date(year, month, i);
             days.push({ day: d.getDate(), month: 'curr', date: d });
         }
 
         // Next month to fill grid (42 cells total usually covers all)
         const remaining = 42 - days.length;
         for (let i = 1; i <= remaining; i++) {
-            const d = new Date(year, currentDate.getMonth() + 1, i);
+            const d = new Date(year, month + 1, i);
             days.push({ day: d.getDate(), month: 'next', date: d });
         }
 
-        return days.map(d => {
-            // Count bookings for this day
-            const dateStr = d.date.toISOString().split('T')[0];
-            const count = bookings.filter(b => b.start_date.startsWith(dateStr)).length;
-            return { ...d, count };
+        return days.map((dayCell) => {
+            const dayKey = toLocalYyyyMmDd(dayCell.date);
+            const dayIndex = toDateIndex(dayKey);
+            const count =
+                dayIndex === null
+                    ? 0
+                    : bookingRanges.filter((range) => range.start <= dayIndex && range.end >= dayIndex).length;
+
+            return { ...dayCell, count };
         });
-    }, [currentDate, bookings, year]);
+    }, [bookingRanges, month, year]);
 
     const handlePrevMonth = () => {
-        setCurrentDate(new Date(year, currentDate.getMonth() - 1, 1));
+        setCurrentDate(new Date(year, month - 1, 1));
     };
 
     const handleNextMonth = () => {
-        setCurrentDate(new Date(year, currentDate.getMonth() + 1, 1));
+        setCurrentDate(new Date(year, month + 1, 1));
     };
 
-    const currentMonthBookings = bookings.filter(b => {
-        const d = new Date(b.start_date);
-        return d.getMonth() === currentDate.getMonth() && d.getFullYear() === year;
-    }).length;
+    const currentMonthBookings = useMemo(() => {
+        const monthStartIndex = toDateIndex(toLocalYyyyMmDd(new Date(year, month, 1)));
+        const monthEndIndex = toDateIndex(toLocalYyyyMmDd(new Date(year, month + 1, 0)));
+        if (monthStartIndex === null || monthEndIndex === null) {
+            return 0;
+        }
+
+        return bookingRanges.filter((range) => range.start <= monthEndIndex && range.end >= monthStartIndex).length;
+    }, [bookingRanges, month, year]);
 
     const today = new Date();
 

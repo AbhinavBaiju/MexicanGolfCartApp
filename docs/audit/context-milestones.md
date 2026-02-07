@@ -9,6 +9,7 @@
 - Manual test checklist and test priorities: [docs/audit/05-test-and-verification-plan.md](docs/audit/05-test-and-verification-plan.md)
 - Milestone implementation handoff log: [docs/audit/06-m1-implementation-log.md](docs/audit/06-m1-implementation-log.md)
 - Milestone implementation handoff log: [docs/audit/07-m2-implementation-log.md](docs/audit/07-m2-implementation-log.md)
+- Milestone implementation handoff log: [docs/audit/09-m3-implementation-log.md](docs/audit/09-m3-implementation-log.md)
 
 ## System Snapshot (from the docs)
 - Stack: Vite+React+Polaris admin SPA (Cloudflare Pages), Cloudflare Worker + D1 backend, Shopify Remix shell for OAuth/tunnel, App Bridge v4 for auth.
@@ -39,6 +40,7 @@ M3 – Booking Management Flow (ISS-003/017/013/012)
 - Add booking detail view (modal or route) using `GET /admin/bookings/:token`; wire BookingCard "Manage" button.
 - Add toast feedback for `POST /admin/bookings/:token/complete`; guard against fulfillment failure.
 - Fix date display to be timezone-safe and update calendar counts to include spans between start/end.
+Status: Completed on 2026-02-07. See [docs/audit/09-m3-implementation-log.md](docs/audit/09-m3-implementation-log.md).
 
 M4 – Dashboard Polishing (ISS-005/010/018/019/007)
 - Wire "FAQ" to help URL and "New service" to Inventory (or product-create modal).

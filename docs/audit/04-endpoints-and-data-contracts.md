@@ -233,6 +233,48 @@ All prefixed with `/admin`. Auth: JWT session token via `Authorization: Bearer <
 }
 ```
 
+#### `POST /admin/bookings`
+- **Handler:** `handleBookingsPost` (`worker/src/admin.ts`)
+- **Purpose:** Create manual booking from admin while enforcing backend authority for availability/capacity.
+- **Request Body:**
+```json
+{
+  "start_date": "2026-02-10",
+  "end_date": "2026-02-12",
+  "location": "PLAYA",
+  "customer_name": "John Doe",
+  "customer_email": "john@example.com",
+  "fulfillment_type": "Pick Up",
+  "delivery_address": null,
+  "items": [
+    {
+      "product_id": 9678432108731,
+      "variant_id": 50536218566859,
+      "qty": 1
+    }
+  ]
+}
+```
+- **Response (success):**
+```json
+{
+  "ok": true,
+  "booking_token": "uuid",
+  "status": "CONFIRMED"
+}
+```
+- **Validation/Rules enforced:**
+  - Validates required fields and item shape (`qty >= 1`, positive ids).
+  - Validates dates with store timezone rules (`STORE_TIMEZONE`) and location lead-time/min-duration.
+  - Validates location is active and products are rentable/configured.
+  - Uses fail-fast SQL reservation strategy on `inventory_day` to prevent overselling.
+- **Capacity conflict behavior:** Returns `409` with `"Insufficient capacity"`.
+- **Side Effects:**
+  1. Creates `bookings` row (`status = CONFIRMED`).
+  2. Creates `booking_items` rows.
+  3. Creates `booking_days` rows.
+  4. Atomically increments `inventory_day.reserved_qty`.
+
 #### `POST /admin/bookings/:token/complete`
 - **Handler:** `handleBookingComplete` ([admin.ts](worker/src/admin.ts#L916))
 - **Request Body:** None
@@ -247,9 +289,6 @@ All prefixed with `/admin`. Auth: JWT session token via `Authorization: Bearer <
   1. Calls Shopify Fulfillment API (`2025-10`) to fulfill the order.
   2. Updates booking status to `RELEASED`.
 - **⚠️ Issue:** Sets status to `RELEASED` even if Shopify fulfillment fails (L937–940). The `fulfillment.success` flag in the response may be `false`.
-
-#### Missing: `POST /admin/bookings` (create)
-- **Status:** Not implemented. The "Manual booking" button in the UI has no backend to call.
 
 #### Missing: `PATCH /admin/bookings/:token` (edit)
 - **Status:** Not implemented. The "Manage" button in the UI has no backend to call.
@@ -557,7 +596,6 @@ All proxy endpoints require `?shop=<domain>` query parameter.
 
 | Needed Endpoint | Purpose | Why Missing |
 |---|---|---|
-| `POST /admin/bookings` | Create manual booking | Feature not implemented |
 | `PATCH /admin/bookings/:token` | Edit booking details | Feature not implemented |
 | `DELETE /admin/bookings/:token` | Cancel booking from admin | Feature not implemented (only `complete` exists) |
 | `GET /admin/calendar-counts` | Day-level booking counts for calendar | UI recalculates from booking list (inefficient) |

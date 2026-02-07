@@ -2,6 +2,17 @@
 
 Manual test checklist and automated test recommendations derived from the audit findings.
 
+## Implementation Status Notes (2026-02-07)
+
+- M1 (Bookings parity) is implemented.
+- M2 (Manual booking creation) is implemented.
+
+Validation commands executed after M2:
+- `npx tsc -p worker/tsconfig.json` (pass)
+- `npm --workspace worker run test` (pass)
+- `npm --workspace apps/admin run lint` (pass with one pre-existing warning in `apps/admin/src/pages/Agreement.tsx`)
+- `npm --workspace apps/admin run build` (pass)
+
 ---
 
 ## 1. Manual Test Checklist

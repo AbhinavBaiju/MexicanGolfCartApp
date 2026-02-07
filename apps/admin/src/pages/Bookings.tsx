@@ -281,20 +281,46 @@ export default function Bookings() {
 
     const loadFilterOptions = useCallback(async () => {
         try {
-            const response = await fetch('/products');
-            if (!response.ok) {
+            const [productsResponse, shopifyProductsResponse] = await Promise.all([
+                fetch('/products'),
+                fetch('/shopify-products'),
+            ]);
+
+            if (!productsResponse.ok) {
                 return;
             }
 
-            const data = (await response.json()) as ProductConfigResponse;
-            const serviceIds = (data.products || [])
+            const productsData = (await productsResponse.json()) as ProductConfigResponse;
+            const serviceIds = (productsData.products || [])
                 .map((entry) => toNumber(entry.product_id))
                 .filter((id) => Number.isInteger(id) && id > 0)
                 .sort((a, b) => a - b);
+            const shopifyTitleById = new Map<number, string>();
+
+            if (shopifyProductsResponse.ok) {
+                const shopifyProductsData = (await shopifyProductsResponse.json()) as ShopifyProductsResponse;
+                for (const product of shopifyProductsData.products || []) {
+                    const productId = toNumber(product.id);
+                    if (!Number.isInteger(productId) || productId <= 0) {
+                        continue;
+                    }
+                    const title = product.title?.trim();
+                    if (title) {
+                        shopifyTitleById.set(productId, title);
+                    }
+                }
+            }
+
+            const nextServiceOptions = serviceIds
+                .map((id) => ({
+                    label: shopifyTitleById.get(id) ?? `Service ${id}`,
+                    value: String(id),
+                }))
+                .sort((a, b) => a.label.localeCompare(b.label));
 
             setServiceOptions([
                 { label: 'All services', value: 'all' },
-                ...serviceIds.map((id) => ({ label: `Service ${id}`, value: String(id) })),
+                ...nextServiceOptions,
             ]);
         } catch (loadError) {
             console.error('Failed to load booking filter options', loadError);

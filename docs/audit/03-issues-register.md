@@ -98,6 +98,12 @@ Each entry represents a distinct issue found during the audit. Issues are ordere
 | **What's Needed to Fix** | Wire "New service" to navigate to `/inventory` or open a product config modal. Wire "FAQ" to an external URL or help content. |
 | **Owner Type** | Frontend |
 
+**Implementation Update (2026-02-07):** Resolved in M4.
+- `apps/admin/src/pages/Dashboard.tsx` now wires:
+  - `FAQ` button to open an external help/FAQ URL.
+  - `New service` button to navigate to `/inventory`.
+- Footer help/FAQ links were also updated from placeholder `#` targets to real URLs.
+
 ---
 
 ## ISS-006: Bookings Page Export Button Does Nothing
@@ -131,6 +137,12 @@ Each entry represents a distinct issue found during the audit. Issues are ordere
 | **Impact** | Product management is only accessible through the Inventory page's "Edit settings" / "Link Product" flow. The standalone Products page is unreachable. |
 | **What's Needed to Fix** | Either add a `/products` route to `App.tsx` or remove the dead file. |
 | **Owner Type** | Frontend |
+
+**Implementation Update (2026-02-07):** Resolved in M4.
+- Dead standalone page `apps/admin/src/pages/Products.tsx` was removed.
+- `apps/admin/src/App.tsx` now includes explicit legacy-route handling:
+  - `/products` redirects to `/inventory`.
+- This aligns product configuration flow with the active Inventory architecture.
 
 ---
 
@@ -182,6 +194,11 @@ Each entry represents a distinct issue found during the audit. Issues are ordere
 | **Impact** | Misleading UX. Users expect to see teammate/staff members but see locations. |
 | **What's Needed to Fix** | Rename label to "All locations" or implement a proper teammates/staff data model. |
 | **Owner Type** | Frontend |
+
+**Implementation Update (2026-02-07):** Resolved in M4.
+- Dashboard filter label/state was updated from teammate semantics to location semantics.
+- `All teammates` is now `All locations`; behavior continues to filter by `location_code`.
+- Location options are still sourced from `GET /admin/locations`.
 
 ---
 
@@ -332,6 +349,11 @@ Each entry represents a distinct issue found during the audit. Issues are ordere
 | **What's Needed to Fix** | Cross-reference with Shopify product data (already fetched by `ProductInventory` component) to show product titles. |
 | **Owner Type** | Frontend |
 
+**Implementation Update (2026-02-07):** Resolved in M4.
+- Dashboard service filter now cross-references `GET /admin/products` with `GET /admin/shopify-products` and renders product titles.
+- Bookings page service filter was aligned to the same title-based labeling behavior.
+- Fallback label remains `Service <id>` when Shopify title data is unavailable.
+
 ---
 
 ## ISS-019: Unused Dependencies and Dead Code
@@ -348,6 +370,15 @@ Each entry represents a distinct issue found during the audit. Issues are ordere
 | **Impact** | Increased bundle size, developer confusion. |
 | **What's Needed to Fix** | Remove unused packages and dead code, or wire them up if needed. |
 | **Owner Type** | Frontend |
+
+**Implementation Update (2026-02-07):** Resolved in M4.
+- Removed unused dependencies from `apps/admin/package.json`:
+  - `recharts`
+  - `@shopify/app-bridge-utils`
+- Removed dead files:
+  - `apps/admin/src/components/DashboardChart.tsx`
+  - `apps/admin/src/pages/Products.tsx`
+- Added `/products -> /inventory` redirect to preserve legacy deep links while removing dead page code.
 
 ---
 

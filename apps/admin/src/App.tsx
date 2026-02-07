@@ -1,7 +1,7 @@
 import { AppProvider as PolarisProvider, Frame } from '@shopify/polaris';
 import { NavMenu } from '@shopify/app-bridge-react';
 import enTranslations from '@shopify/polaris/locales/en.json';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 
 
 // Pages
@@ -25,6 +25,7 @@ function AppContent() {
         <Route path="/" element={<Dashboard />} />
         <Route path="/bookings" element={<Bookings />} />
         <Route path="/inventory" element={<Inventory />} />
+        <Route path="/products" element={<Navigate to="/inventory" replace />} />
         <Route path="/locations" element={<Locations />} />
         <Route path="/agreement" element={<Agreement />} />
       </Routes>

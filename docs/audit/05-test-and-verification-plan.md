@@ -7,6 +7,7 @@ Manual test checklist and automated test recommendations derived from the audit 
 - M1 (Bookings parity) is implemented.
 - M2 (Manual booking creation) is implemented.
 - M3 (Booking management flow) is implemented.
+- M4 (Dashboard polishing) is implemented.
 
 Validation commands executed after M2:
 - `npx tsc -p worker/tsconfig.json` (pass)
@@ -29,6 +30,14 @@ Validation commands executed after M3 implementation (2026-02-07):
 - `npm --workspace apps/admin run build` (pass)
 
 M3 verification status: **implemented and validated** (no M1/M2 regression found in automated reruns).
+
+Validation commands executed after M4 implementation (2026-02-07):
+- `npx tsc -p worker/tsconfig.json` (pass)
+- `npm --workspace worker run test` (pass: 7 passed, 0 failed)
+- `npm --workspace apps/admin run lint` (pass with the same pre-existing warning in `apps/admin/src/pages/Agreement.tsx:353`)
+- `npm --workspace apps/admin run build` (pass)
+
+M4 verification status: **implemented and validated** (no M1/M2/M3 regression found in automated reruns).
 
 ---
 
@@ -65,7 +74,7 @@ Organized by page/area. Each test case references the issue it validates.
 | M-13 | FAQ button response | Click "FAQ" | Opens FAQ content or navigates to help page | ISS-005 |
 | M-14 | New service button response | Click "+ New service" | Opens product config form or navigates to Inventory | ISS-005 |
 | M-15 | Service filter labels | Open "All services" filter dropdown | Options show human-readable product titles, not numeric IDs | ISS-018 |
-| M-16 | "All teammates" label | Open "All teammates" filter dropdown | Label says "All locations" (or shows actual team members) | ISS-010 |
+| M-16 | Location filter label | Open the location filter dropdown on Dashboard | Default label is "All locations" and options are locations | ISS-010 |
 | M-17 | Calendar multi-day bookings | Create a booking spanning 3+ days → view calendar | All days in range show booking count, not just start date | ISS-012 |
 | M-18 | Dashboard export works | Apply filters → click "Export" | CSV downloads with filtered data | — |
 
@@ -73,8 +82,8 @@ Organized by page/area. Each test case references the issue it validates.
 
 | # | Test Case | Steps | Expected Result | Issue Ref |
 |---|---|---|---|---|
-| M-19 | Products page reachable | Navigate to `/products` in admin SPA | Products page renders with product list | ISS-007 |
-| M-20 | NavMenu includes Products | Check left navigation menu | "Products" link exists and works | ISS-007 |
+| M-19 | Legacy `/products` route behavior | Navigate to `/products` in admin SPA | Route redirects to `/inventory` | ISS-007 |
+| M-20 | No dead standalone Products page | Inspect admin routes/files | No standalone `Products.tsx` page is required for active flow | ISS-007 |
 
 ### 1.5 Agreement Page
 

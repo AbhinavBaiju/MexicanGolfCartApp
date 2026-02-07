@@ -590,9 +590,9 @@ All proxy endpoints require `?shop=<domain>` query parameter.
 
 | Issue | Frontend Expects | Backend Provides |
 |---|---|---|
-| **Bookings search** | Client-side filter on `booking_token`, `location_code`, `order_id` | Server-side `search` param also searches `customer_name`, `customer_email` |
-| **Service labels** | Displays `"Service ${product_id}"` | Could return product titles if joined with Shopify data |
-| **WAITLIST status** | Bookings tab sends `?status=WAITLIST` | Backend accepts it but DB rejects the value on write |
+| **Bookings search** | Dashboard and Bookings now send server-side `search` query params (M1) | Server-side `search` supports `booking_token`, `order_id`, `customer_name`, `customer_email` |
+| **Service labels** | Dashboard and Bookings now cross-reference product IDs with `/admin/shopify-products` titles (M4) | `GET /admin/products` still returns IDs only; `/admin/shopify-products` remains required for title enrichment |
+| **WAITLIST status** | Bookings UI no longer exposes WAITLIST tab/filter (M1) | Backend parser still accepts `WAITLIST` though DB schema disallows writes |
 | **Calendar booking count** | M3 now counts full booking spans on the client | Backend returns `start_date` + `end_date`; no dedicated day-aggregation endpoint exists yet |
 
 ### 7.2 Missing Endpoints
@@ -607,9 +607,9 @@ All proxy endpoints require `?shop=<domain>` query parameter.
 
 | Endpoint | Issue |
 |---|---|
-| `GET /admin/products` | Returns `product_id` (numeric) but no `title`. Must be cross-referenced with `/shopify-products`. |
+| `GET /admin/products` | Returns `product_id` (numeric) but no `title`. Frontend now cross-references `/shopify-products` (M4), but endpoint shape is still split. |
 | `POST /admin/bookings/:token/complete` | Sets booking to `RELEASED` regardless of fulfillment success. Response includes `fulfillment.success: false` but DB state is already changed (frontend now surfaces this with explicit error toast). |
-| `GET /admin/dashboard` | `productStats` returns `product_id` + `count` but no product title — same label problem as service filter. |
+| `GET /admin/dashboard` | `productStats` returns `product_id` + `count` with no title. M4 frontend now enriches labels via `/shopify-products`, but the endpoint itself still omits names. |
 
 ### 7.4 API Version Inconsistency
 

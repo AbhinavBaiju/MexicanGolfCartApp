@@ -10,6 +10,7 @@
 - Milestone implementation handoff log: [docs/audit/06-m1-implementation-log.md](docs/audit/06-m1-implementation-log.md)
 - Milestone implementation handoff log: [docs/audit/07-m2-implementation-log.md](docs/audit/07-m2-implementation-log.md)
 - Milestone implementation handoff log: [docs/audit/09-m3-implementation-log.md](docs/audit/09-m3-implementation-log.md)
+- Milestone implementation handoff log: [docs/audit/11-m4-implementation-log.md](docs/audit/11-m4-implementation-log.md)
 
 ## System Snapshot (from the docs)
 - Stack: Vite+React+Polaris admin SPA (Cloudflare Pages), Cloudflare Worker + D1 backend, Shopify Remix shell for OAuth/tunnel, App Bridge v4 for auth.
@@ -47,6 +48,7 @@ M4 – Dashboard Polishing (ISS-005/010/018/019/007)
 - Relabel "All teammates" to locations or implement actual staff data.
 - Show service labels using Shopify product titles (`/admin/shopify-products`) instead of numeric IDs.
 - Remove dead code/deps (recharts, DashboardChart, unused Products page) or route `/products` correctly.
+Status: Completed on 2026-02-07. See [docs/audit/11-m4-implementation-log.md](docs/audit/11-m4-implementation-log.md).
 
 M5 – Shopify Remix Cleanup (ISS-008/009)
 - Remove template "Generate a product" action and placeholder routes or redirect them to the Cloudflare Pages admin SPA.

@@ -14,6 +14,7 @@ import {
 } from '@shopify/polaris';
 import { SearchIcon, ExportIcon, ArrowUpIcon, PlusIcon } from '@shopify/polaris-icons';
 import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { DashboardStats } from '../components/DashboardStats';
 import { ProductInventory } from '../components/ProductInventory';
 import { BookingsCalendar } from '../components/BookingsCalendar';
@@ -86,6 +87,10 @@ interface ProductConfigResponse {
     products?: Array<{ product_id: string | number }>;
 }
 
+interface ShopifyProductsResponse {
+    products?: Array<{ id: string | number; title?: string | null }>;
+}
+
 interface LocationsResponse {
     locations?: Array<{ code: string; name: string }>;
 }
@@ -131,6 +136,9 @@ const UPSELL_OPTIONS: FilterOption[] = [
     { label: 'With upsell', value: 'with_upsell' },
     { label: 'Without upsell', value: 'without_upsell' },
 ];
+
+const HELP_URL = (import.meta.env.VITE_DASHBOARD_HELP_URL ?? 'https://help.shopify.com/en/manual/apps').trim();
+const FAQ_URL = (import.meta.env.VITE_DASHBOARD_FAQ_URL ?? 'https://help.shopify.com/en/manual').trim();
 
 function toNumber(value: string | number | null | undefined): number {
     if (typeof value === 'number' && Number.isFinite(value)) {
@@ -206,6 +214,7 @@ function FilterPopover({ options, selectedValue, onSelect }: FilterPopoverProps)
 
 export default function Dashboard() {
     const fetch = useAuthenticatedFetch();
+    const navigate = useNavigate();
     const [calendarBookings, setCalendarBookings] = useState<Booking[]>([]);
     const [filteredBookings, setFilteredBookings] = useState<DashboardBooking[]>([]);
     const [stats, setStats] = useState({
@@ -224,23 +233,24 @@ export default function Dashboard() {
 
     const [upcomingOnly, setUpcomingOnly] = useState(true);
     const [selectedService, setSelectedService] = useState('all');
-    const [selectedTeammate, setSelectedTeammate] = useState('all');
+    const [selectedLocation, setSelectedLocation] = useState('all');
     const [selectedType, setSelectedType] = useState('all');
     const [selectedStatus, setSelectedStatus] = useState('all');
     const [selectedUpsell, setSelectedUpsell] = useState('all');
     const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
     const [serviceOptions, setServiceOptions] = useState<FilterOption[]>([{ label: 'All services', value: 'all' }]);
-    const [teammateOptions, setTeammateOptions] = useState<FilterOption[]>([{ label: 'All teammates', value: 'all' }]);
+    const [locationOptions, setLocationOptions] = useState<FilterOption[]>([{ label: 'All locations', value: 'all' }]);
 
     const loadData = useCallback(async () => {
         setLoadingDashboard(true);
         try {
-            const [dashboardRes, bookingsRes, productsRes, locationsRes] = await Promise.all([
+            const [dashboardRes, bookingsRes, productsRes, locationsRes, shopifyProductsRes] = await Promise.all([
                 fetch('/dashboard'),
                 fetch('/bookings'),
                 fetch('/products'),
                 fetch('/locations'),
+                fetch('/shopify-products'),
             ]);
 
             if (dashboardRes.ok) {
@@ -283,15 +293,37 @@ export default function Dashboard() {
                     .map((entry) => toNumber(entry.product_id))
                     .filter((id) => Number.isInteger(id) && id > 0)
                     .sort((a, b) => a - b);
+                const shopifyTitleById = new Map<number, string>();
+                if (shopifyProductsRes.ok) {
+                    const shopifyProductsData = (await shopifyProductsRes.json()) as ShopifyProductsResponse;
+                    for (const product of shopifyProductsData.products || []) {
+                        const productId = toNumber(product.id);
+                        if (!Number.isInteger(productId) || productId <= 0) {
+                            continue;
+                        }
+                        const title = product.title?.trim();
+                        if (title) {
+                            shopifyTitleById.set(productId, title);
+                        }
+                    }
+                }
+
+                const nextServiceOptions = serviceIds
+                    .map((id) => ({
+                        label: shopifyTitleById.get(id) ?? `Service ${id}`,
+                        value: String(id),
+                    }))
+                    .sort((a, b) => a.label.localeCompare(b.label));
+
                 setServiceOptions([
                     { label: 'All services', value: 'all' },
-                    ...serviceIds.map((id) => ({ label: `Service ${id}`, value: String(id) })),
+                    ...nextServiceOptions,
                 ]);
             }
 
             if (locationsRes.ok) {
                 const locationsData = (await locationsRes.json()) as LocationsResponse;
-                const nextOptions: FilterOption[] = [{ label: 'All teammates', value: 'all' }];
+                const nextOptions: FilterOption[] = [{ label: 'All locations', value: 'all' }];
                 const seenCodes = new Set<string>();
                 for (const location of locationsData.locations || []) {
                     const code = location.code.trim();
@@ -304,7 +336,7 @@ export default function Dashboard() {
                         value: code,
                     });
                 }
-                setTeammateOptions(nextOptions);
+                setLocationOptions(nextOptions);
             }
         } catch (error) {
             console.error('Error fetching dashboard data:', error);
@@ -334,8 +366,8 @@ export default function Dashboard() {
             if (selectedService !== 'all') {
                 params.set('product_id', selectedService);
             }
-            if (selectedTeammate !== 'all') {
-                params.set('location_code', selectedTeammate);
+            if (selectedLocation !== 'all') {
+                params.set('location_code', selectedLocation);
             }
             if (selectedType !== 'all') {
                 params.set('fulfillment_type', selectedType);
@@ -366,11 +398,25 @@ export default function Dashboard() {
         } finally {
             setLoadingBookings(false);
         }
-    }, [fetch, selectedService, selectedStatus, selectedTeammate, selectedType, selectedUpsell, sortDirection, upcomingOnly]);
+    }, [fetch, selectedLocation, selectedService, selectedStatus, selectedType, selectedUpsell, sortDirection, upcomingOnly]);
 
     useEffect(() => {
         void loadFilteredBookings(debouncedSearch);
     }, [debouncedSearch, loadFilteredBookings]);
+
+    const openExternalUrl = useCallback((url: string) => {
+        if (typeof window !== 'undefined') {
+            window.open(url, '_blank', 'noopener,noreferrer');
+        }
+    }, []);
+
+    const handleOpenFaq = useCallback(() => {
+        openExternalUrl(FAQ_URL);
+    }, [openExternalUrl]);
+
+    const handleCreateService = useCallback(() => {
+        navigate('/inventory');
+    }, [navigate]);
 
     const handleMarkComplete = async (token: string): Promise<boolean> => {
         try {
@@ -461,8 +507,8 @@ export default function Dashboard() {
                 <InlineStack align="space-between" blockAlign="center">
                     <Text as="h1" variant="headingLg">Dashboard</Text>
                     <ButtonGroup>
-                        <Button>FAQ</Button>
-                        <Button variant="primary" icon={PlusIcon}>New service</Button>
+                        <Button onClick={handleOpenFaq}>FAQ</Button>
+                        <Button variant="primary" icon={PlusIcon} onClick={handleCreateService}>New service</Button>
                     </ButtonGroup>
                 </InlineStack>
             </div>
@@ -522,9 +568,9 @@ export default function Dashboard() {
                                                 onSelect={setSelectedService}
                                             />
                                             <FilterPopover
-                                                options={teammateOptions}
-                                                selectedValue={selectedTeammate}
-                                                onSelect={setSelectedTeammate}
+                                                options={locationOptions}
+                                                selectedValue={selectedLocation}
+                                                onSelect={setSelectedLocation}
                                             />
                                             <FilterPopover
                                                 options={TYPE_OPTIONS}
@@ -595,7 +641,16 @@ export default function Dashboard() {
 
             <Box paddingBlockEnd="2400">
                 <div style={{ textAlign: 'center', marginTop: '40px' }}>
-                    <Text as="p" tone="subdued">Get help <a href="#" style={{ color: '#2c6ecb' }}>using this app</a> or <a href="#" style={{ color: '#2c6ecb' }}>read the FAQ</a></Text>
+                    <Text as="p" tone="subdued">
+                        Get help{' '}
+                        <a href={HELP_URL} target="_blank" rel="noreferrer" style={{ color: '#2c6ecb' }}>
+                            using this app
+                        </a>{' '}
+                        or{' '}
+                        <a href={FAQ_URL} target="_blank" rel="noreferrer" style={{ color: '#2c6ecb' }}>
+                            read the FAQ
+                        </a>
+                    </Text>
                 </div>
             </Box>
         </Page>

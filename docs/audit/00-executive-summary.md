@@ -1,6 +1,6 @@
 # Executive Summary — Admin Dashboard UI Audit
 
-**Date:** 2026-02-08  
+**Date:** 2026-02-07  
 **Scope:** MexicanGolfCartsApp admin dashboard, Cloudflare Worker backend, Shopify embedded app integration  
 **Method:** Static code analysis, UI-to-code tracing, architecture mapping
 
@@ -52,8 +52,8 @@ The Shopify Remix app (`apps/shopify/mexican-golf-cart/`) still contains **defau
 - **Low Risk:** CORS is set to `Access-Control-Allow-Origin: *` globally, which is overly permissive.
 
 ### UX Dead Ends
-- **High:** Remaining prominent stubs are mostly outside M3 scope (Dashboard "FAQ", Dashboard "New service", Remix placeholder routes).
-- **Low:** M1/M3 removed major Bookings dead-ends (filters/export/search/manual booking/manage and calendar span counting are now wired).
+- **High:** Remaining prominent dead-ends are now mostly in Shopify Remix placeholder/template routes (ISS-008/ISS-009).
+- **Low:** M1-M4 removed major admin dead-ends (Bookings filters/export/search/manual booking/manage/calendar and Dashboard FAQ/New service/location/service-label polish).
 
 ---
 
@@ -105,6 +105,24 @@ Milestone 3 (Booking Management Flow) has now also been implemented:
 - `BookingsCalendar` now counts bookings across full day spans (`start_date` through `end_date`) and uses timezone-safe date keys.
 
 Post-M3 validation re-run (2026-02-07):
+
+- `npx tsc -p worker/tsconfig.json`: **PASS**
+- `npm --workspace worker run test`: **PASS** (7 passed, 0 failed)
+- `npm --workspace apps/admin run lint`: **PASS with warning** (`apps/admin/src/pages/Agreement.tsx:353`, pre-existing `react-hooks/exhaustive-deps`)
+- `npm --workspace apps/admin run build`: **PASS**
+
+Milestone 4 (Dashboard Polishing) has now also been implemented:
+
+- Dashboard `FAQ` now opens help content and `New service` now routes to Inventory.
+- Dashboard filter label now uses location semantics (`All locations`) instead of teammate semantics.
+- Dashboard and Bookings service filters now show Shopify product titles by cross-referencing `/admin/shopify-products`.
+- Dead code/deps cleanup completed:
+  - removed `apps/admin/src/components/DashboardChart.tsx`
+  - removed `apps/admin/src/pages/Products.tsx`
+  - removed admin dependencies `recharts` and `@shopify/app-bridge-utils`
+- Legacy `/products` URL now redirects to `/inventory`.
+
+Post-M4 validation re-run (2026-02-07):
 
 - `npx tsc -p worker/tsconfig.json`: **PASS**
 - `npm --workspace worker run test`: **PASS** (7 passed, 0 failed)

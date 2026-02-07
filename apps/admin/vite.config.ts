@@ -8,6 +8,8 @@ export default defineConfig({
     preserveSymlinks: true,
   },
   server: {
+    // Shopify dev tunnel hostnames rotate on every run; allow them in development.
+    allowedHosts: true,
     watch: {
       followSymlinks: false,
     },

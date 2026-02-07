@@ -8,11 +8,87 @@ interface AdminAuthContext {
     shopId: number;
     shopDomain: string;
     payload: SessionTokenPayload;
+    /** The raw session token (JWT) used for token exchange if an access_token is needed. */
+    sessionToken: string;
+}
+
+/**
+ * Returns the shop's offline access token from D1, performing a Shopify token
+ * exchange if one is not stored yet.  The exchanged token is persisted so
+ * subsequent calls are fast.
+ */
+async function getShopAccessToken(
+    env: Env,
+    shopId: number,
+    shopDomain: string,
+    sessionToken: string
+): Promise<string | null> {
+    // 1. Check if we already have an access_token stored
+    const row = await env.DB.prepare('SELECT access_token FROM shops WHERE id = ?')
+        .bind(shopId)
+        .first();
+    if (row && typeof row.access_token === 'string' && row.access_token.length > 0) {
+        return row.access_token as string;
+    }
+
+    // 2. Perform token exchange: session-token → offline access-token
+    try {
+        const body = new URLSearchParams({
+            client_id: env.SHOPIFY_API_KEY,
+            client_secret: env.SHOPIFY_API_SECRET,
+            grant_type: 'urn:ietf:params:oauth:grant-type:token-exchange',
+            subject_token: sessionToken,
+            subject_token_type: 'urn:ietf:params:oauth:token-type:id_token',
+            requested_token_type: 'urn:shopify:params:oauth:token-type:offline-access-token',
+        });
+
+        const resp = await fetch(`https://${shopDomain}/admin/oauth/access_token`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                Accept: 'application/json',
+            },
+            body: body.toString(),
+        });
+
+        if (!resp.ok) {
+            const txt = await resp.text();
+            console.error('Token exchange failed', resp.status, txt);
+            return null;
+        }
+
+        const data = (await resp.json()) as { access_token: string };
+        const accessToken = data.access_token;
+        if (!accessToken) {
+            console.error('Token exchange returned empty access_token');
+            return null;
+        }
+
+        // 3. Persist so we don't exchange on every request
+        await env.DB.prepare('UPDATE shops SET access_token = ? WHERE id = ?')
+            .bind(accessToken, shopId)
+            .run();
+
+        return accessToken;
+    } catch (e) {
+        console.error('Token exchange exception', e);
+        return null;
+    }
 }
 
 interface InventoryOverrideInput {
     date: string;
     capacity: number;
+}
+
+interface BookingQuerySchema {
+    hasInvalidReason: boolean;
+    hasCustomerName: boolean;
+    hasCustomerEmail: boolean;
+    hasRevenue: boolean;
+    hasFulfillmentType: boolean;
+    hasDeliveryAddress: boolean;
+    hasSignedAgreements: boolean;
 }
 
 export async function handleAdminRequest(request: Request, env: Env): Promise<Response> {
@@ -135,13 +211,13 @@ export async function handleAdminRequest(request: Request, env: Env): Promise<Re
 
     if (segments.length === 3 && segments[0] === 'bookings' && segments[2] === 'complete') {
         if (method === 'POST') {
-            return handleBookingComplete(env, auth.shopId, segments[1]);
+            return handleBookingComplete(env, auth, segments[1]);
         }
     }
 
     if (segments.length === 1 && segments[0] === 'shopify-products') {
         if (method === 'GET') {
-            return handleShopifyProductsGet(env, auth.shopId);
+            return handleShopifyProductsGet(env, auth);
         }
     }
 
@@ -169,17 +245,40 @@ async function requireAdminAuth(request: Request, env: Env): Promise<Response | 
         return jsonError('Invalid token destination', 401);
     }
 
-    const shopRow = await env.DB.prepare('SELECT id FROM shops WHERE shop_domain = ? AND uninstalled_at IS NULL')
+    let shopRow = await env.DB.prepare('SELECT id FROM shops WHERE shop_domain = ? AND uninstalled_at IS NULL')
         .bind(shopDomain)
         .first();
+
     if (!shopRow) {
-        return jsonError('Shop not found', 401);
+        // Auto-provision: the session token is already verified (signature, exp,
+        // aud, iss/dest) so the shop is legitimately installed.  The Remix host
+        // handles OAuth via Prisma; the worker's D1 may not have the row yet.
+        try {
+            await env.DB.prepare(
+                `INSERT INTO shops (shop_domain, installed_at)
+                 VALUES (?, datetime('now'))
+                 ON CONFLICT(shop_domain) DO UPDATE SET uninstalled_at = NULL`
+            )
+                .bind(shopDomain)
+                .run();
+
+            shopRow = await env.DB.prepare('SELECT id FROM shops WHERE shop_domain = ?')
+                .bind(shopDomain)
+                .first();
+        } catch (e) {
+            console.error('Auto-provision shop failed', e);
+        }
+
+        if (!shopRow) {
+            return jsonError('Shop not found', 401);
+        }
     }
 
     return {
         shopId: shopRow.id as number,
         shopDomain,
         payload,
+        sessionToken: token,
     };
 }
 
@@ -501,23 +600,48 @@ async function handleBookingsGet(request: Request, env: Env, shopId: number): Pr
         return jsonError('Invalid date range', 400);
     }
 
+    const schema = await getBookingQuerySchema(env.DB);
+
     // Look up the shop domain once so we can join to signed_agreements (keyed by shop_domain).
     const shopRow = await env.DB.prepare('SELECT shop_domain FROM shops WHERE id = ?').bind(shopId).first();
     const shopDomain = shopRow && isRecord(shopRow) ? (shopRow.shop_domain as string | null) : null;
 
+    const selectColumns = [
+        'b.booking_token',
+        'b.status',
+        'b.location_code',
+        'b.start_date',
+        'b.end_date',
+        'b.order_id',
+        schema.hasInvalidReason ? 'b.invalid_reason' : 'NULL as invalid_reason',
+        'b.created_at',
+        'b.updated_at',
+        schema.hasCustomerName ? 'b.customer_name' : 'NULL as customer_name',
+        schema.hasCustomerEmail ? 'b.customer_email' : 'NULL as customer_email',
+        schema.hasRevenue ? 'b.revenue' : 'NULL as revenue',
+        schema.hasFulfillmentType ? 'b.fulfillment_type' : 'NULL as fulfillment_type',
+        schema.hasDeliveryAddress ? 'b.delivery_address' : 'NULL as delivery_address',
+        schema.hasSignedAgreements ? 's.id as signed_agreement_id' : 'NULL as signed_agreement_id',
+        'COUNT(DISTINCT bi.product_id) as service_count',
+        'GROUP_CONCAT(DISTINCT bi.product_id) as service_product_ids',
+        'CASE WHEN COUNT(DISTINCT bi.product_id) > 1 THEN 1 ELSE 0 END as has_upsell',
+    ];
+
     let sql =
-        `SELECT b.booking_token, b.status, b.location_code, b.start_date, b.end_date, b.order_id, b.invalid_reason,
-                        b.created_at, b.updated_at, b.customer_name, b.customer_email, b.revenue, b.fulfillment_type, b.delivery_address,
-                        s.id as signed_agreement_id,
-                        COUNT(DISTINCT bi.product_id) as service_count,
-                        GROUP_CONCAT(DISTINCT bi.product_id) as service_product_ids,
-                        CASE WHEN COUNT(DISTINCT bi.product_id) > 1 THEN 1 ELSE 0 END as has_upsell
+        `SELECT ${selectColumns.join(', ')}
          FROM bookings b
-         LEFT JOIN booking_items bi ON bi.booking_id = b.id
+         LEFT JOIN booking_items bi ON bi.booking_id = b.id`;
+
+    if (schema.hasSignedAgreements) {
+        sql += `
          LEFT JOIN signed_agreements s
-             ON s.order_id = b.order_id AND s.shop_domain = ?
+             ON s.order_id = b.order_id AND s.shop_domain = ?`;
+    }
+
+    sql += `
          WHERE b.shop_id = ?`;
-    const bindings: (string | number)[] = [shopDomain ?? '', shopId];
+
+    const bindings: (string | number)[] = schema.hasSignedAgreements ? [shopDomain ?? '', shopId] : [shopId];
     if (status) {
         sql += ' AND b.status = ?';
         bindings.push(status);
@@ -566,14 +690,55 @@ async function handleBookingsGet(request: Request, env: Env, shopId: number): Pr
     }
     if (search) {
         const term = `%${search.trim()}%`;
-        sql += ' AND (b.booking_token LIKE ? OR CAST(b.order_id AS TEXT) LIKE ? OR b.customer_name LIKE ? OR b.customer_email LIKE ?)';
-        bindings.push(term, term, term, term);
+        const searchClauses = ['b.booking_token LIKE ?', 'CAST(b.order_id AS TEXT) LIKE ?'];
+        const searchBindings: string[] = [term, term];
+        if (schema.hasCustomerName) {
+            searchClauses.push('b.customer_name LIKE ?');
+            searchBindings.push(term);
+        }
+        if (schema.hasCustomerEmail) {
+            searchClauses.push('b.customer_email LIKE ?');
+            searchBindings.push(term);
+        }
+        sql += ` AND (${searchClauses.join(' OR ')})`;
+        bindings.push(...searchBindings);
     }
 
-    sql += ` GROUP BY
-        b.id, b.booking_token, b.status, b.location_code, b.start_date, b.end_date, b.order_id, b.invalid_reason,
-        b.created_at, b.updated_at, b.customer_name, b.customer_email, b.revenue, b.fulfillment_type, b.delivery_address,
-        s.id`;
+    const groupByColumns = [
+        'b.id',
+        'b.booking_token',
+        'b.status',
+        'b.location_code',
+        'b.start_date',
+        'b.end_date',
+        'b.order_id',
+        'b.created_at',
+        'b.updated_at',
+    ];
+
+    if (schema.hasInvalidReason) {
+        groupByColumns.push('b.invalid_reason');
+    }
+    if (schema.hasCustomerName) {
+        groupByColumns.push('b.customer_name');
+    }
+    if (schema.hasCustomerEmail) {
+        groupByColumns.push('b.customer_email');
+    }
+    if (schema.hasRevenue) {
+        groupByColumns.push('b.revenue');
+    }
+    if (schema.hasFulfillmentType) {
+        groupByColumns.push('b.fulfillment_type');
+    }
+    if (schema.hasDeliveryAddress) {
+        groupByColumns.push('b.delivery_address');
+    }
+    if (schema.hasSignedAgreements) {
+        groupByColumns.push('s.id');
+    }
+
+    sql += ` GROUP BY ${groupByColumns.join(', ')}`;
     sql += ` ORDER BY b.start_date ${sortDirection}, b.created_at DESC`;
 
     const rows = await env.DB.prepare(sql).bind(...bindings).all();
@@ -581,20 +746,48 @@ async function handleBookingsGet(request: Request, env: Env, shopId: number): Pr
 }
 
 async function handleBookingGet(env: Env, shopId: number, bookingToken: string): Promise<Response> {
+    const schema = await getBookingQuerySchema(env.DB);
+
     const shopRow = await env.DB.prepare('SELECT shop_domain FROM shops WHERE id = ?').bind(shopId).first();
     const shopDomain = shopRow && isRecord(shopRow) ? (shopRow.shop_domain as string | null) : null;
 
-    const booking = await env.DB.prepare(
-        `SELECT b.id, b.booking_token, b.status, b.location_code, b.start_date, b.end_date, b.expires_at, b.order_id,
-                b.invalid_reason, b.created_at, b.updated_at, b.customer_name, b.customer_email, b.revenue, b.fulfillment_type, b.delivery_address,
-                s.id as signed_agreement_id
-         FROM bookings b
+    const selectColumns = [
+        'b.id',
+        'b.booking_token',
+        'b.status',
+        'b.location_code',
+        'b.start_date',
+        'b.end_date',
+        'b.expires_at',
+        'b.order_id',
+        schema.hasInvalidReason ? 'b.invalid_reason' : 'NULL as invalid_reason',
+        'b.created_at',
+        'b.updated_at',
+        schema.hasCustomerName ? 'b.customer_name' : 'NULL as customer_name',
+        schema.hasCustomerEmail ? 'b.customer_email' : 'NULL as customer_email',
+        schema.hasRevenue ? 'b.revenue' : 'NULL as revenue',
+        schema.hasFulfillmentType ? 'b.fulfillment_type' : 'NULL as fulfillment_type',
+        schema.hasDeliveryAddress ? 'b.delivery_address' : 'NULL as delivery_address',
+        schema.hasSignedAgreements ? 's.id as signed_agreement_id' : 'NULL as signed_agreement_id',
+    ];
+
+    let sql =
+        `SELECT ${selectColumns.join(', ')}
+         FROM bookings b`;
+    const bindings: (string | number)[] = [];
+
+    if (schema.hasSignedAgreements) {
+        sql += `
          LEFT JOIN signed_agreements s
-           ON s.order_id = b.order_id AND s.shop_domain = ?
-         WHERE b.shop_id = ? AND b.booking_token = ?`
-    )
-        .bind(shopDomain ?? '', shopId, bookingToken)
-        .first();
+           ON s.order_id = b.order_id AND s.shop_domain = ?`;
+        bindings.push(shopDomain ?? '');
+    }
+
+    sql += `
+         WHERE b.shop_id = ? AND b.booking_token = ?`;
+    bindings.push(shopId, bookingToken);
+
+    const booking = await env.DB.prepare(sql).bind(...bindings).first();
     if (!booking) {
         return jsonError('Booking not found', 404);
     }
@@ -620,6 +813,7 @@ async function handleBookingGet(env: Env, shopId: number, bookingToken: string):
 
 async function handleDashboardGet(env: Env, shopId: number): Promise<Response> {
     const today = getTodayInTimeZone(STORE_TIMEZONE);
+    const schema = await getBookingQuerySchema(env.DB);
 
     // activeBookings: CONFIRMED and overlapping today
     const activeBookingsStmt = env.DB.prepare(
@@ -646,15 +840,17 @@ async function handleDashboardGet(env: Env, shopId: number): Promise<Response> {
     ).bind(shopId, today);
 
     // upcoming: start_date > today, CONFIRMED
+    const upcomingCustomerName = schema.hasCustomerName ? 'customer_name' : 'NULL as customer_name';
     const upcomingStmt = env.DB.prepare(
-        `SELECT booking_token, start_date, end_date, location_code, status, order_id, customer_name FROM bookings 
+        `SELECT booking_token, start_date, end_date, location_code, status, order_id, ${upcomingCustomerName} FROM bookings 
          WHERE shop_id = ? AND start_date > ? AND status = 'CONFIRMED' 
          ORDER BY start_date ASC LIMIT 5`
     ).bind(shopId, today);
 
     // history: recent
+    const historyInvalidReason = schema.hasInvalidReason ? 'invalid_reason' : 'NULL as invalid_reason';
     const historyStmt = env.DB.prepare(
-        `SELECT booking_token, start_date, end_date, status, created_at, invalid_reason FROM bookings 
+        `SELECT booking_token, start_date, end_date, status, created_at, ${historyInvalidReason} FROM bookings 
          WHERE shop_id = ? 
          ORDER BY created_at DESC LIMIT 10`
     ).bind(shopId);
@@ -667,9 +863,11 @@ async function handleDashboardGet(env: Env, shopId: number): Promise<Response> {
         `SELECT COUNT(*) as count FROM bookings WHERE shop_id = ? AND status IN ('CANCELLED', 'EXPIRED', 'INVALID')`
     ).bind(shopId);
 
-    const revenueStmt = env.DB.prepare(
-        `SELECT SUM(revenue) as total FROM bookings WHERE shop_id = ? AND status = 'CONFIRMED'`
-    ).bind(shopId);
+    const revenueStmt = schema.hasRevenue
+        ? env.DB.prepare(
+            `SELECT SUM(revenue) as total FROM bookings WHERE shop_id = ? AND status = 'CONFIRMED'`
+        ).bind(shopId)
+        : env.DB.prepare('SELECT 0 as total');
 
     const results = await env.DB.batch([
         activeBookingsStmt,
@@ -714,10 +912,10 @@ async function handleDashboardGet(env: Env, shopId: number): Promise<Response> {
     });
 }
 
-async function handleBookingComplete(env: Env, shopId: number, bookingToken: string): Promise<Response> {
+async function handleBookingComplete(env: Env, auth: AdminAuthContext, bookingToken: string): Promise<Response> {
     const booking = await env.DB.prepare(
         `SELECT id, order_id, status FROM bookings WHERE shop_id = ? AND booking_token = ?`
-    ).bind(shopId, bookingToken).first();
+    ).bind(auth.shopId, bookingToken).first();
 
     if (!booking) {
         return jsonError('Booking not found', 404);
@@ -727,7 +925,7 @@ async function handleBookingComplete(env: Env, shopId: number, bookingToken: str
     let fulfillmentResult = { success: false, message: 'No Order ID' };
 
     if (orderId) {
-        fulfillmentResult = await fulfillShopifyOrder(env, shopId, orderId);
+        fulfillmentResult = await fulfillShopifyOrder(env, auth, orderId);
     }
 
     await env.DB.prepare(
@@ -737,15 +935,14 @@ async function handleBookingComplete(env: Env, shopId: number, bookingToken: str
     return Response.json({ ok: true, fulfillment: fulfillmentResult });
 }
 
-async function fulfillShopifyOrder(env: Env, shopId: number, orderId: number): Promise<{ success: boolean; message: string }> {
-    const shopRow = await env.DB.prepare('SELECT shop_domain, access_token FROM shops WHERE id = ?')
-        .bind(shopId).first();
-    if (!shopRow) return { success: false, message: 'Shop not found' };
+async function fulfillShopifyOrder(env: Env, auth: AdminAuthContext, orderId: number): Promise<{ success: boolean; message: string }> {
+    const accessToken = await getShopAccessToken(env, auth.shopId, auth.shopDomain, auth.sessionToken);
+    if (!accessToken) return { success: false, message: 'Unable to obtain access token' };
 
-    const { shop_domain, access_token } = shopRow as { shop_domain: string; access_token: string };
+    const apiVersion = '2025-10';
 
-    const foRes = await fetch(`https://${shop_domain}/admin/api/2025-10/orders/${orderId}/fulfillment_orders.json`, {
-        headers: { 'X-Shopify-Access-Token': access_token }
+    const foRes = await fetch(`https://${auth.shopDomain}/admin/api/${apiVersion}/orders/${orderId}/fulfillment_orders.json`, {
+        headers: { 'X-Shopify-Access-Token': accessToken }
     });
 
     if (!foRes.ok) return { success: false, message: 'Failed to fetch fulfillment orders' };
@@ -770,10 +967,10 @@ async function fulfillShopifyOrder(env: Env, shopId: number, orderId: number): P
         }
     };
 
-    const createRes = await fetch(`https://${shop_domain}/admin/api/2025-10/fulfillments.json`, {
+    const createRes = await fetch(`https://${auth.shopDomain}/admin/api/${apiVersion}/fulfillments.json`, {
         method: 'POST',
         headers: {
-            'X-Shopify-Access-Token': access_token,
+            'X-Shopify-Access-Token': accessToken,
             'Content-Type': 'application/json'
         },
         body: JSON.stringify(payload)
@@ -788,12 +985,11 @@ async function fulfillShopifyOrder(env: Env, shopId: number, orderId: number): P
     return { success: true, message: 'Fulfilled' };
 }
 
-async function handleShopifyProductsGet(env: Env, shopId: number): Promise<Response> {
-    const shopRow = await env.DB.prepare('SELECT shop_domain, access_token FROM shops WHERE id = ?')
-        .bind(shopId).first();
-    if (!shopRow) return jsonError('Shop not found', 404);
+async function handleShopifyProductsGet(env: Env, auth: AdminAuthContext): Promise<Response> {
+    const accessToken = await getShopAccessToken(env, auth.shopId, auth.shopDomain, auth.sessionToken);
+    if (!accessToken) return jsonError('Unable to obtain Shopify access token. Please reinstall the app.', 502);
 
-    const { shop_domain, access_token } = shopRow as { shop_domain: string; access_token: string };
+    const apiVersion = '2025-10';
 
     const query = `
     {
@@ -825,10 +1021,10 @@ async function handleShopifyProductsGet(env: Env, shopId: number): Promise<Respo
     `;
 
     try {
-        const response = await fetch(`https://${shop_domain}/admin/api/2025-10/graphql.json`, {
+        const response = await fetch(`https://${auth.shopDomain}/admin/api/${apiVersion}/graphql.json`, {
             method: 'POST',
             headers: {
-                'X-Shopify-Access-Token': access_token,
+                'X-Shopify-Access-Token': accessToken,
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({ query }),
@@ -1465,4 +1661,67 @@ function getOptionalBoolean(record: Record<string, unknown>, key: string): boole
 
 function jsonError(message: string, status: number): Response {
     return Response.json({ ok: false, error: message }, { status });
+}
+
+const tableExistsCache = new Map<string, boolean>();
+const tableColumnsCache = new Map<string, Set<string>>();
+let bookingSchemaCache: BookingQuerySchema | null = null;
+
+async function tableExists(db: D1Database, table: string): Promise<boolean> {
+    const cached = tableExistsCache.get(table);
+    if (cached !== undefined) {
+        return cached;
+    }
+
+    const row = await db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+        .bind(table)
+        .first();
+
+    const exists = Boolean(row);
+    tableExistsCache.set(table, exists);
+    return exists;
+}
+
+async function getTableColumns(db: D1Database, table: string): Promise<Set<string>> {
+    const cached = tableColumnsCache.get(table);
+    if (cached) {
+        return cached;
+    }
+
+    const rows = await db.prepare(`PRAGMA table_info(${table})`).all();
+    const columns = new Set<string>();
+    for (const row of rows.results ?? []) {
+        if (!isRecord(row)) {
+            continue;
+        }
+        const name = readStringField(row, 'name');
+        if (name) {
+            columns.add(name);
+        }
+    }
+
+    tableColumnsCache.set(table, columns);
+    return columns;
+}
+
+async function getBookingQuerySchema(db: D1Database): Promise<BookingQuerySchema> {
+    if (bookingSchemaCache) {
+        return bookingSchemaCache;
+    }
+
+    const bookingsColumns = await getTableColumns(db, 'bookings');
+    const hasSignedAgreements = await tableExists(db, 'signed_agreements');
+
+    bookingSchemaCache = {
+        hasInvalidReason: bookingsColumns.has('invalid_reason'),
+        hasCustomerName: bookingsColumns.has('customer_name'),
+        hasCustomerEmail: bookingsColumns.has('customer_email'),
+        hasRevenue: bookingsColumns.has('revenue'),
+        hasFulfillmentType: bookingsColumns.has('fulfillment_type'),
+        hasDeliveryAddress: bookingsColumns.has('delivery_address'),
+        hasSignedAgreements,
+    };
+
+    return bookingSchemaCache;
 }

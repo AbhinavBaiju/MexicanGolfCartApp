@@ -1,4 +1,5 @@
-# Dedicated dev app config for `shopify app dev --config dev --no-update`
+# Dedicated dev app config for `shopify app dev --config dev`
+# Shopify CLI will auto-update dev URLs to its tunnel for embedded admin HMR.
 
 client_id = "ec7f70d8e7c5f2ec9cb8b6811b23e491"
 name = "Mexico Golf Carts"
@@ -6,7 +7,7 @@ application_url = "https://master.mexican-golf-cart-admin.pages.dev"
 embedded = true
 
 [build]
-automatically_update_urls_on_dev = false
+automatically_update_urls_on_dev = true
 
 [webhooks]
 api_version = "2026-04"

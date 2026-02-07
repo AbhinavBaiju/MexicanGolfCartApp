@@ -61,69 +61,97 @@ export async function verifySessionToken(
     apiKey: string,
     jwksUrl?: string
 ): Promise<SessionTokenPayload | null> {
-    const parts = token.split('.');
-    if (parts.length !== 3) {
-        return null;
-    }
-    const [encodedHeader, encodedPayload, encodedSignature] = parts;
-    const header = decodeBase64UrlJson<JwtHeader>(encodedHeader);
-    const payload = decodeBase64UrlJson<SessionTokenPayload>(encodedPayload);
-
-    if (!header || !payload) {
-        return null;
-    }
-
-    const nowSeconds = Math.floor(Date.now() / 1000);
-    if (!Number.isFinite(payload.exp) || payload.exp <= nowSeconds) {
-        return null;
-    }
-    if (payload.nbf && payload.nbf > nowSeconds) {
-        return null;
-    }
-
-    if (!isAudienceMatch(payload.aud, apiKey)) {
-        return null;
-    }
-
-    const destHost = safeUrlHost(payload.dest);
-    const issHost = safeUrlHost(payload.iss);
-    if (!destHost || !issHost || destHost !== issHost) {
-        return null;
-    }
-
-    const signingInput = `${encodedHeader}.${encodedPayload}`;
-    const signature = base64UrlToUint8Array(encodedSignature);
-    const data = new TextEncoder().encode(signingInput);
-
-    if (header.alg === 'RS256') {
-        const jwk = await getShopifyJwk(header.kid, jwksUrl);
-        if (!jwk) {
+    try {
+        const parts = token.split('.');
+        if (parts.length !== 3) {
+            console.error('Session token: invalid structure (expected 3 parts)');
             return null;
         }
-        const key = await crypto.subtle.importKey(
-            'jwk',
-            jwk,
-            { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-            false,
-            ['verify']
-        );
-        const verified = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, signature as BufferSource, data as BufferSource);
-        return verified ? payload : null;
-    }
+        const [encodedHeader, encodedPayload, encodedSignature] = parts;
+        const header = decodeBase64UrlJson<JwtHeader>(encodedHeader);
+        const payload = decodeBase64UrlJson<SessionTokenPayload>(encodedPayload);
 
-    if (header.alg === 'HS256') {
-        const key = await crypto.subtle.importKey(
-            'raw',
-            new TextEncoder().encode(secret),
-            { name: 'HMAC', hash: 'SHA-256' },
-            false,
-            ['verify']
-        );
-        const verified = await crypto.subtle.verify('HMAC', key, signature as BufferSource, data as BufferSource);
-        return verified ? payload : null;
-    }
+        if (!header || !payload) {
+            console.error('Session token: failed to decode header or payload');
+            return null;
+        }
 
-    return null;
+        const nowSeconds = Math.floor(Date.now() / 1000);
+        if (!Number.isFinite(payload.exp) || payload.exp <= nowSeconds) {
+            console.error('Session token: expired', { exp: payload.exp, now: nowSeconds });
+            return null;
+        }
+        if (payload.nbf && payload.nbf > nowSeconds) {
+            console.error('Session token: not yet valid (nbf in future)', { nbf: payload.nbf, now: nowSeconds });
+            return null;
+        }
+
+        if (!isAudienceMatch(payload.aud, apiKey)) {
+            console.error('Session token: audience mismatch', { aud: payload.aud, expected: apiKey });
+            return null;
+        }
+
+        const destHost = safeUrlHost(payload.dest);
+        const issHost = safeUrlHost(payload.iss);
+        if (!destHost || !issHost || destHost !== issHost) {
+            console.error('Session token: iss/dest host mismatch', { iss: payload.iss, dest: payload.dest });
+            return null;
+        }
+
+        const signingInput = `${encodedHeader}.${encodedPayload}`;
+        const signature = base64UrlToUint8Array(encodedSignature);
+        const data = new TextEncoder().encode(signingInput);
+
+        if (header.alg === 'RS256') {
+            const jwk = await getShopifyJwk(header.kid, jwksUrl);
+            if (!jwk) {
+                console.error('Session token: RS256 JWK not found', { kid: header.kid });
+                return null;
+            }
+            const key = await crypto.subtle.importKey(
+                'jwk',
+                jwk,
+                { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+                false,
+                ['verify']
+            );
+            const verified = await crypto.subtle.verify(
+                'RSASSA-PKCS1-v1_5',
+                key,
+                signature as BufferSource,
+                data as BufferSource
+            );
+            if (!verified) {
+                console.error('Session token: RS256 signature verification failed');
+            }
+            return verified ? payload : null;
+        }
+
+        if (header.alg === 'HS256') {
+            if (!secret || secret.trim().length === 0) {
+                console.error('Session token: HS256 secret is empty or missing');
+                return null;
+            }
+            const key = await crypto.subtle.importKey(
+                'raw',
+                new TextEncoder().encode(secret),
+                { name: 'HMAC', hash: 'SHA-256' },
+                false,
+                ['verify']
+            );
+            const verified = await crypto.subtle.verify('HMAC', key, signature as BufferSource, data as BufferSource);
+            if (!verified) {
+                console.error('Session token: HS256 signature verification failed');
+            }
+            return verified ? payload : null;
+        }
+
+        console.error('Session token: unsupported algorithm', { alg: header.alg });
+        return null;
+    } catch (e) {
+        console.error('Session token verification failed', e);
+        return null;
+    }
 }
 
 export async function handleAuthCallback(request: Request, env: Env): Promise<Response> {
@@ -297,28 +325,33 @@ function safeUrlHost(value: string): string | null {
 }
 
 async function getShopifyJwk(kid?: string, jwksUrl?: string): Promise<JsonWebKey | null> {
-    const url = jwksUrl || DEFAULT_JWKS_URL;
-    const now = Date.now();
-    if (jwksCache.keys.size === 0 || now - jwksCache.fetchedAt > JWKS_CACHE_TTL_MS) {
-        const resp = await fetch(url);
-        if (!resp.ok) {
-            return null;
-        }
-        const data = (await resp.json()) as JwksResponse;
-        const map = new Map<string, JsonWebKey>();
-        for (const key of data.keys) {
-            if (key.kid) {
-                map.set(key.kid, key);
+    try {
+        const url = jwksUrl || DEFAULT_JWKS_URL;
+        const now = Date.now();
+        if (jwksCache.keys.size === 0 || now - jwksCache.fetchedAt > JWKS_CACHE_TTL_MS) {
+            const resp = await fetch(url);
+            if (!resp.ok) {
+                return null;
             }
+            const data = (await resp.json()) as JwksResponse;
+            const map = new Map<string, JsonWebKey>();
+            for (const key of data.keys) {
+                if (key.kid) {
+                    map.set(key.kid, key);
+                }
+            }
+            jwksCache.keys = map;
+            jwksCache.fetchedAt = now;
         }
-        jwksCache.keys = map;
-        jwksCache.fetchedAt = now;
-    }
 
-    if (kid) {
-        return jwksCache.keys.get(kid) || null;
-    }
+        if (kid) {
+            return jwksCache.keys.get(kid) || null;
+        }
 
-    const first = jwksCache.keys.values().next();
-    return first.done ? null : first.value;
+        const first = jwksCache.keys.values().next();
+        return first.done ? null : first.value;
+    } catch (e) {
+        console.error('Failed to fetch Shopify JWKS', e);
+        return null;
+    }
 }

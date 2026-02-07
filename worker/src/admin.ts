@@ -1,7 +1,7 @@
 import { Env } from './types';
 import { SessionTokenPayload, verifySessionToken } from './auth';
 import { checkRateLimit } from './rateLimit';
-import { listDateStrings, parseDateParts, getTodayInTimeZone } from './date';
+import { datePartsToIndex, listDateStrings, parseDateParts, getTodayInTimeZone } from './date';
 import { STORE_TIMEZONE } from './config';
 
 interface AdminAuthContext {
@@ -79,6 +79,31 @@ async function getShopAccessToken(
 interface InventoryOverrideInput {
     date: string;
     capacity: number;
+}
+
+interface ManualBookingItemInput {
+    product_id: number;
+    variant_id?: number;
+    qty: number;
+}
+
+interface ManualBookingRequestBody {
+    start_date: string;
+    end_date: string;
+    location: string;
+    items: ManualBookingItemInput[];
+    customer_name?: string;
+    customer_email?: string;
+    fulfillment_type?: 'Pick Up' | 'Delivery';
+    delivery_address?: string;
+    revenue?: number;
+}
+
+interface NormalizedManualBookingItem {
+    product_id: number;
+    variant_id: number;
+    qty: number;
+    default_capacity: number;
 }
 
 interface BookingQuerySchema {
@@ -161,6 +186,9 @@ export async function handleAdminRequest(request: Request, env: Env): Promise<Re
     if (segments.length === 1 && segments[0] === 'bookings') {
         if (method === 'GET') {
             return handleBookingsGet(request, env, auth.shopId);
+        }
+        if (method === 'POST') {
+            return handleBookingsPost(request, env, auth.shopId);
         }
     }
 
@@ -554,6 +582,241 @@ async function handleInventoryPut(request: Request, env: Env, shopId: number): P
     }
 
     return Response.json({ ok: true });
+}
+
+async function handleBookingsPost(request: Request, env: Env, shopId: number): Promise<Response> {
+    const body = await readJsonBody(request);
+    if (!body) {
+        return jsonError('Invalid JSON body', 400);
+    }
+
+    const parsed = parseManualBookingBody(body);
+    if (!parsed) {
+        return jsonError('Invalid booking request', 400);
+    }
+
+    const location = await env.DB.prepare(
+        'SELECT code, lead_time_days, min_duration_days FROM locations WHERE shop_id = ? AND code = ? AND active = 1'
+    )
+        .bind(shopId, parsed.location)
+        .first();
+    if (!location) {
+        return jsonError('Invalid location', 400);
+    }
+
+    const startParts = parseDateParts(parsed.start_date);
+    const endParts = parseDateParts(parsed.end_date);
+    if (!startParts || !endParts) {
+        return jsonError('Invalid dates', 400);
+    }
+
+    const startIndex = datePartsToIndex(startParts);
+    const endIndex = datePartsToIndex(endParts);
+    if (startIndex > endIndex) {
+        return jsonError('Start date must be before end date', 400);
+    }
+
+    const todayStr = getTodayInTimeZone(STORE_TIMEZONE);
+    const todayParts = parseDateParts(todayStr);
+    if (!todayParts) {
+        return jsonError('Failed to read store date', 500);
+    }
+
+    const leadTimeDays = toNumber(location.lead_time_days);
+    const minDurationDays = toNumber(location.min_duration_days);
+    if (
+        leadTimeDays === null ||
+        minDurationDays === null ||
+        !Number.isInteger(leadTimeDays) ||
+        !Number.isInteger(minDurationDays)
+    ) {
+        return jsonError('Location rules are invalid', 500);
+    }
+
+    const todayIndex = datePartsToIndex(todayParts);
+    const durationDays = endIndex - startIndex + 1;
+    if (startIndex < todayIndex + leadTimeDays) {
+        return jsonError('Start date violates lead time', 400);
+    }
+    if (durationDays < minDurationDays) {
+        return jsonError('Below minimum duration', 400);
+    }
+
+    const uniqueProductIds = Array.from(new Set(parsed.items.map((item) => item.product_id)));
+    if (uniqueProductIds.length === 0) {
+        return jsonError('At least one item is required', 400);
+    }
+
+    const placeholders = uniqueProductIds.map(() => '?').join(', ');
+    const productRows = await env.DB.prepare(
+        `SELECT product_id, variant_id, rentable, default_capacity
+         FROM products
+         WHERE shop_id = ? AND product_id IN (${placeholders})`
+    )
+        .bind(shopId, ...uniqueProductIds)
+        .all();
+
+    const productMap = new Map<number, { variant_id: number | null; rentable: number; default_capacity: number }>();
+    for (const row of productRows.results ?? []) {
+        if (!isRecord(row)) {
+            continue;
+        }
+
+        const productId = toNumber(row.product_id);
+        const variantId = toNumber(row.variant_id);
+        const rentableRaw = row.rentable;
+        const rentable = toNumber(rentableRaw) ?? (typeof rentableRaw === 'boolean' ? (rentableRaw ? 1 : 0) : null);
+        const defaultCapacity = toNumber(row.default_capacity);
+
+        if (
+            productId === null ||
+            !Number.isInteger(productId) ||
+            productId <= 0 ||
+            rentable === null ||
+            defaultCapacity === null ||
+            !Number.isInteger(defaultCapacity)
+        ) {
+            continue;
+        }
+
+        productMap.set(productId, {
+            variant_id: variantId,
+            rentable,
+            default_capacity: defaultCapacity,
+        });
+    }
+
+    const normalizedItems = normalizeManualBookingItems(parsed.items, productMap);
+    if (!normalizedItems) {
+        return jsonError('Invalid product configuration', 400);
+    }
+
+    const dateList = listDateStrings(parsed.start_date, parsed.end_date);
+    if (!dateList) {
+        return jsonError('Invalid date range', 400);
+    }
+
+    const schema = await getBookingQuerySchema(env.DB);
+    const bookingId = crypto.randomUUID();
+    const bookingToken = crypto.randomUUID();
+    const bookingColumns = [
+        'id',
+        'shop_id',
+        'booking_token',
+        'status',
+        'location_code',
+        'start_date',
+        'end_date',
+        'expires_at',
+        'order_id',
+        'created_at',
+        'updated_at',
+    ];
+    const bookingValues = [
+        '?',
+        '?',
+        '?',
+        "'CONFIRMED'",
+        '?',
+        '?',
+        '?',
+        'NULL',
+        'NULL',
+        "datetime('now')",
+        "datetime('now')",
+    ];
+    const bookingBindings: Array<string | number | null> = [
+        bookingId,
+        shopId,
+        bookingToken,
+        parsed.location,
+        parsed.start_date,
+        parsed.end_date,
+    ];
+
+    if (schema.hasCustomerName) {
+        bookingColumns.push('customer_name');
+        bookingValues.push('?');
+        bookingBindings.push(parsed.customer_name ?? null);
+    }
+    if (schema.hasCustomerEmail) {
+        bookingColumns.push('customer_email');
+        bookingValues.push('?');
+        bookingBindings.push(parsed.customer_email ?? null);
+    }
+    if (schema.hasRevenue) {
+        bookingColumns.push('revenue');
+        bookingValues.push('?');
+        bookingBindings.push(parsed.revenue ?? null);
+    }
+    if (schema.hasFulfillmentType) {
+        bookingColumns.push('fulfillment_type');
+        bookingValues.push('?');
+        bookingBindings.push(parsed.fulfillment_type ?? 'Pick Up');
+    }
+    if (schema.hasDeliveryAddress) {
+        bookingColumns.push('delivery_address');
+        bookingValues.push('?');
+        bookingBindings.push(parsed.fulfillment_type === 'Delivery' ? parsed.delivery_address ?? null : null);
+    }
+
+    const statements: D1PreparedStatement[] = [];
+    statements.push(
+        env.DB.prepare(
+            `INSERT INTO bookings (${bookingColumns.join(', ')})
+             VALUES (${bookingValues.join(', ')})`
+        ).bind(...bookingBindings)
+    );
+
+    for (const item of normalizedItems) {
+        statements.push(
+            env.DB.prepare(
+                `INSERT INTO booking_items (booking_id, product_id, variant_id, qty)
+                 VALUES (?, ?, ?, ?)`
+            ).bind(bookingId, item.product_id, item.variant_id, item.qty)
+        );
+    }
+
+    for (const date of dateList) {
+        for (const item of normalizedItems) {
+            statements.push(
+                env.DB.prepare(
+                    `INSERT OR IGNORE INTO inventory_day (shop_id, product_id, date, capacity, reserved_qty)
+                     VALUES (?, ?, ?, ?, 0)`
+                ).bind(shopId, item.product_id, date, item.default_capacity)
+            );
+            statements.push(
+                env.DB.prepare(
+                    `UPDATE inventory_day
+                     SET reserved_qty = reserved_qty + ?
+                     WHERE shop_id = ? AND product_id = ? AND date = ? AND reserved_qty + ? <= capacity`
+                ).bind(item.qty, shopId, item.product_id, date, item.qty)
+            );
+            statements.push(env.DB.prepare('SELECT CASE WHEN changes() = 1 THEN 1 ELSE 1/0 END;'));
+            statements.push(
+                env.DB.prepare(
+                    `INSERT INTO booking_days (booking_id, product_id, date, qty)
+                     VALUES (?, ?, ?, ?)`
+                ).bind(bookingId, item.product_id, date, item.qty)
+            );
+        }
+    }
+
+    try {
+        await env.DB.batch(statements);
+    } catch (e) {
+        console.error('Manual booking creation failed', e);
+        if (String(e).includes('division')) {
+            return jsonError('Insufficient capacity', 409);
+        }
+        return jsonError('Failed to create booking', 500);
+    }
+
+    return Response.json({
+        ok: true,
+        booking_token: bookingToken,
+        status: 'CONFIRMED',
+    });
 }
 
 async function handleBookingsGet(request: Request, env: Env, shopId: number): Promise<Response> {
@@ -1548,6 +1811,149 @@ function getOptionalPositiveInt(record: Record<string, unknown>, key: string): n
         return value;
     }
     return undefined;
+}
+
+function parseManualBookingBody(body: Record<string, unknown>): ManualBookingRequestBody | null {
+    const startDate = getString(body, 'start_date');
+    const endDate = getString(body, 'end_date');
+    const location = getString(body, 'location') ?? getString(body, 'location_code');
+    const items = body.items;
+
+    if (!startDate || !endDate || !location || !Array.isArray(items) || items.length === 0) {
+        return null;
+    }
+
+    const parsedItems: ManualBookingItemInput[] = [];
+    for (const entry of items) {
+        if (!isRecord(entry)) {
+            return null;
+        }
+
+        const productId = getNumber(entry, 'product_id');
+        const qty = getNumber(entry, 'qty');
+        const variantId = getOptionalNumber(entry, 'variant_id');
+
+        if (productId === null || !Number.isInteger(productId) || productId <= 0) {
+            return null;
+        }
+        if (qty === null || !Number.isInteger(qty) || qty <= 0) {
+            return null;
+        }
+        if (variantId !== undefined && (!Number.isInteger(variantId) || variantId <= 0)) {
+            return null;
+        }
+
+        parsedItems.push({
+            product_id: productId,
+            variant_id: variantId,
+            qty,
+        });
+    }
+
+    if ('customer_name' in body && typeof body.customer_name !== 'string') {
+        return null;
+    }
+    if ('customer_email' in body && typeof body.customer_email !== 'string') {
+        return null;
+    }
+
+    const customerName = getOptionalString(body, 'customer_name');
+    const customerEmail = getOptionalString(body, 'customer_email');
+    const fulfillmentTypeRaw = getOptionalString(body, 'fulfillment_type');
+    const deliveryAddress = getOptionalString(body, 'delivery_address');
+    const revenue = getOptionalNumber(body, 'revenue');
+
+    if ('revenue' in body && (revenue === undefined || revenue < 0)) {
+        return null;
+    }
+
+    let fulfillmentType: 'Pick Up' | 'Delivery' | undefined;
+    if ('fulfillment_type' in body) {
+        if (!fulfillmentTypeRaw || (fulfillmentTypeRaw !== 'Pick Up' && fulfillmentTypeRaw !== 'Delivery')) {
+            return null;
+        }
+        fulfillmentType = fulfillmentTypeRaw;
+    }
+
+    if (fulfillmentType === 'Delivery' && !deliveryAddress) {
+        return null;
+    }
+    if (deliveryAddress && fulfillmentType !== 'Delivery') {
+        return null;
+    }
+    if ('delivery_address' in body && typeof body.delivery_address !== 'string') {
+        return null;
+    }
+
+    const parsed: ManualBookingRequestBody = {
+        start_date: startDate,
+        end_date: endDate,
+        location,
+        items: parsedItems,
+    };
+
+    if (customerName) {
+        parsed.customer_name = customerName;
+    }
+    if (customerEmail) {
+        parsed.customer_email = customerEmail;
+    }
+    if (fulfillmentType) {
+        parsed.fulfillment_type = fulfillmentType;
+    }
+    if (deliveryAddress) {
+        parsed.delivery_address = deliveryAddress;
+    }
+    if (revenue !== undefined) {
+        parsed.revenue = revenue;
+    }
+
+    return parsed;
+}
+
+function normalizeManualBookingItems(
+    items: ManualBookingItemInput[],
+    productMap: Map<number, { variant_id: number | null; rentable: number; default_capacity: number }>
+): NormalizedManualBookingItem[] | null {
+    const itemMap = new Map<number, NormalizedManualBookingItem>();
+
+    for (const item of items) {
+        const product = productMap.get(item.product_id);
+        if (!product || !product.rentable) {
+            return null;
+        }
+
+        const defaultCapacity = product.default_capacity;
+        if (!Number.isInteger(defaultCapacity) || defaultCapacity < 0) {
+            return null;
+        }
+
+        const variantId = product.variant_id ?? item.variant_id;
+        if (variantId === undefined || variantId === null || !Number.isInteger(variantId) || variantId <= 0) {
+            return null;
+        }
+        if (product.variant_id && item.variant_id && product.variant_id !== item.variant_id) {
+            return null;
+        }
+
+        const existing = itemMap.get(item.product_id);
+        if (existing) {
+            if (existing.variant_id !== variantId) {
+                return null;
+            }
+            existing.qty += item.qty;
+            continue;
+        }
+
+        itemMap.set(item.product_id, {
+            product_id: item.product_id,
+            variant_id: variantId,
+            qty: item.qty,
+            default_capacity: defaultCapacity,
+        });
+    }
+
+    return Array.from(itemMap.values());
 }
 
 function rateLimitKey(request: Request, scope: string): string {

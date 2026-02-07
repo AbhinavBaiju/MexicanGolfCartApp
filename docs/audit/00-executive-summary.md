@@ -73,7 +73,7 @@ The admin SPA on the Dashboard page has **more advanced filter/search/export** f
 
 ---
 
-## Implementation Status Update (2026-02-08)
+## Implementation Status Update (2026-02-07)
 
 Milestone 1 (Bookings Page Parity) has been implemented in the admin SPA:
 
@@ -84,4 +84,12 @@ Milestone 1 (Bookings Page Parity) has been implemented in the admin SPA:
 - WAITLIST tab was removed (schema does not allow `WAITLIST` status).
 - "Services availabilities" placeholder tab was removed (dead-end UI removed).
 
-Milestone 2 (Manual Booking Creation) is now the next implementation target.
+Milestone 2 (Manual Booking Creation) has now also been implemented:
+
+- Worker now supports `POST /admin/bookings`.
+- Manual booking creation uses hold-style validations and fail-fast atomic capacity reservation updates.
+- Bookings page now opens a functional manual booking modal from `+ Manual booking`.
+- Modal supports location, date range, product/variant, quantity, fulfillment, and optional customer fields.
+- Submission is wired to backend with success/error toast feedback.
+
+Milestone 3 (Booking Management Flow) is now the next implementation target.

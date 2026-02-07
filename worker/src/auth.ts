@@ -1,5 +1,6 @@
 import { Env } from './types';
 import { verifyHmac } from './security';
+import { DEFAULT_STORE_TIMEZONE, normalizeStoreTimezone, SHOPIFY_ADMIN_API_VERSION } from './config';
 
 interface JwtHeader {
     alg: string;
@@ -177,17 +178,20 @@ export async function handleAuthCallback(request: Request, env: Env): Promise<Re
         return new Response('Failed to exchange access token', { status: 500 });
     }
 
+    const shopTimezone = await fetchShopTimezone(shop, accessToken);
+
     // 3. Store in DB
     try {
         await env.DB.prepare(
-            `INSERT INTO shops (shop_domain, access_token, installed_at) 
-       VALUES (?, ?, datetime('now')) 
+            `INSERT INTO shops (shop_domain, access_token, installed_at, timezone) 
+       VALUES (?, ?, datetime('now'), ?) 
        ON CONFLICT(shop_domain) DO UPDATE SET 
        access_token = excluded.access_token, 
+       timezone = excluded.timezone,
        uninstalled_at = NULL,
        installed_at = datetime('now')`
         )
-            .bind(shop, accessToken)
+            .bind(shop, accessToken, shopTimezone)
             .run();
     } catch (e) {
         console.error('Database error:', e);
@@ -259,7 +263,7 @@ async function registerWebhook(shop: string, accessToken: string, env: Env) {
         }
     ];
 
-    const apiVersion = '2026-04';
+    const apiVersion = SHOPIFY_ADMIN_API_VERSION;
 
     for (const hook of webhooks) {
         try {
@@ -282,6 +286,35 @@ async function registerWebhook(shop: string, accessToken: string, env: Env) {
         } catch (e) {
             console.error(`Webhook ${hook.topic} registration failed`, e);
         }
+    }
+}
+
+async function fetchShopTimezone(shop: string, accessToken: string): Promise<string> {
+    try {
+        const response = await fetch(`https://${shop}/admin/api/${SHOPIFY_ADMIN_API_VERSION}/shop.json`, {
+            method: 'GET',
+            headers: {
+                'X-Shopify-Access-Token': accessToken,
+                Accept: 'application/json',
+            },
+        });
+
+        if (!response.ok) {
+            const body = await response.text();
+            console.warn('Failed to fetch shop timezone, using fallback', response.status, body);
+            return DEFAULT_STORE_TIMEZONE;
+        }
+
+        const payload = await response.json() as unknown;
+        if (!isRecord(payload) || !isRecord(payload.shop)) {
+            return DEFAULT_STORE_TIMEZONE;
+        }
+
+        const timezone = payload.shop.iana_timezone;
+        return normalizeStoreTimezone(timezone);
+    } catch (e) {
+        console.warn('Shop timezone lookup failed, using fallback', e);
+        return DEFAULT_STORE_TIMEZONE;
     }
 }
 
@@ -322,6 +355,10 @@ function safeUrlHost(value: string): string | null {
     } catch {
         return null;
     }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null;
 }
 
 async function getShopifyJwk(kid?: string, jwksUrl?: string): Promise<JsonWebKey | null> {

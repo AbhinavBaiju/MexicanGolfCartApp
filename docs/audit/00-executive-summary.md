@@ -8,7 +8,7 @@
 
 ## What's Broken (High-Level)
 
-The admin dashboard (`apps/admin/`) is a **standalone Vite+React SPA** served via Cloudflare Pages, embedded inside the Shopify admin iframe. Core booking/dashboard/inventory flows are now implemented through M1-M5, and major UI dead-end stubs have been removed. The remaining higher-risk items are backend/platform hardening tasks (CORS scope, proxy signature enforcement, per-shop timezone persistence, and API version consistency).
+The admin dashboard (`apps/admin/`) is a **standalone Vite+React SPA** served via Cloudflare Pages, embedded inside the Shopify admin iframe. Core booking/dashboard/inventory flows are now implemented through M1-M6, and major UI dead-end stubs have been removed. Security/timezone/API-version hardening has now been implemented in the worker.
 
 The Shopify Remix app (`apps/shopify/mexican-golf-cart/`) previously contained **default template code** and placeholder route stubs. As of M5, those routes now redirect safely to the real admin SPA paths, and the template "Generate a product" demo behavior has been removed from the embedded app flow.
 
@@ -48,12 +48,12 @@ The Shopify Remix app (`apps/shopify/mexican-golf-cart/`) previously contained *
 
 ### Auth/Security
 - **High Risk:** `SHOPIFY_API_SECRET` is managed as a Cloudflare secret (not in `wrangler.toml`). If misconfigured, all admin API calls fail with 401. The app has no graceful recovery UI for auth failures.
-- **Medium Risk:** App Proxy signature verification is only enforced for `/agreement/sign` in production; all other proxy routes skip verification.
-- **Low Risk:** CORS is set to `Access-Control-Allow-Origin: *` globally, which is overly permissive.
+- **Low Risk (remaining):** Admin CORS is now origin-restricted in production/staging; keep `ADMIN_ALLOWED_ORIGINS` aligned with active admin deployment origins.
+- **Low Risk (remaining):** Proxy signature checks are now enforced for all `/proxy/*` in production/staging; dev intentionally remains permissive for local/tunnel compatibility.
 
 ### UX Dead Ends
 - **Low:** M1-M5 removed the major dead-ends, including Remix template/placeholder routes (ISS-008/ISS-009).
-- **Low (remaining):** Security/timezone/API-version hardening work remains (M6 scope), but not UX dead-end stubs.
+- **Low (remaining):** No major UX dead-end stubs remain; primary next work is M7 test coverage depth.
 
 ---
 
@@ -67,7 +67,7 @@ The application is a **three-part system**:
 
 3. **Shopify Remix App** (`apps/shopify/mexican-golf-cart/`): OAuth entry point and Shopify CLI host. During `shopify app dev`, it serves the Vite admin SPA via the `dev-shopify-admin.sh` script. Legacy Remix `/app/*` routes now redirect to SPA routes to avoid dead-end placeholder UX.
 
-Post-M1 through M5, the admin SPA now has aligned filter/search/export and management behavior across Dashboard/Bookings, with remaining priority work centered on security/timezone hardening rather than missing UI wiring.
+Post-M1 through M6, the admin SPA now has aligned filter/search/export and management behavior across Dashboard/Bookings, and the worker now includes the planned M6 security/timezone/API-version hardening.
 
 ---
 
@@ -146,5 +146,20 @@ Post-M5 validation re-run (2026-02-07):
 - `npm --workspace apps/shopify/mexican-golf-cart run build`: **PASS with warning** (pre-existing CSS minify warning from Polaris media query output)
 - `npx tsc -p worker/tsconfig.json`: **PASS**
 - `npm --workspace worker run test`: **PASS** (7 passed, 0 failed)
+- `npm --workspace apps/admin run lint`: **PASS with warning** (`apps/admin/src/pages/Agreement.tsx:353`, pre-existing `react-hooks/exhaustive-deps`)
+- `npm --workspace apps/admin run build`: **PASS**
+
+Milestone 6 (Security & Proxy Hardening) has now also been implemented:
+
+- Admin CORS in `worker/src/index.ts` is route-aware and restricted to trusted admin origin(s) outside dev mode.
+- Proxy signature verification in `worker/src/proxy.ts` now applies to all `/proxy/*` routes in production/staging.
+- OAuth callback in `worker/src/auth.ts` now fetches and persists `shop.iana_timezone` to `shops.timezone`.
+- Worker date-rule logic now uses per-shop timezone in admin, proxy, and webhook confirmation flows.
+- Shopify API version usage is centralized in `worker/src/config.ts` and consumed consistently across webhook registration, fulfillment, GraphQL, and order-cancel paths.
+
+Post-M6 validation re-run (2026-02-07):
+
+- `npx tsc -p worker/tsconfig.json`: **PASS**
+- `npm --workspace worker run test`: **PASS** (11 passed, 0 failed)
 - `npm --workspace apps/admin run lint`: **PASS with warning** (`apps/admin/src/pages/Agreement.tsx:353`, pre-existing `react-hooks/exhaustive-deps`)
 - `npm --workspace apps/admin run build`: **PASS**

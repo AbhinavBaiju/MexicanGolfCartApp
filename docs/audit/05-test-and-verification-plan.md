@@ -9,6 +9,7 @@ Manual test checklist and automated test recommendations derived from the audit 
 - M3 (Booking management flow) is implemented.
 - M4 (Dashboard polishing) is implemented.
 - M5 (Shopify Remix cleanup) is implemented.
+- M6 (Security & proxy hardening) is implemented.
 
 Validation commands executed after M2:
 - `npx tsc -p worker/tsconfig.json` (pass)
@@ -49,6 +50,14 @@ Validation commands executed after M5 implementation (2026-02-07):
 - `npm --workspace apps/admin run build` (pass)
 
 M5 verification status: **implemented and validated** (no M1/M2/M3/M4 regression found in automated reruns).
+
+Validation commands executed after M6 implementation (2026-02-07):
+- `npx tsc -p worker/tsconfig.json` (pass)
+- `npm --workspace worker run test` (pass: 11 passed, 0 failed)
+- `npm --workspace apps/admin run lint` (pass with the same pre-existing warning in `apps/admin/src/pages/Agreement.tsx:353`)
+- `npm --workspace apps/admin run build` (pass)
+
+M6 verification status: **implemented and validated** (no M1-M5 regression found in automated reruns).
 
 ---
 
@@ -137,6 +146,7 @@ Organized by page/area. Each test case references the issue it validates.
 Current test files found:
 - [worker/tests/admin.test.ts](worker/tests/admin.test.ts) — Admin endpoint tests
 - [worker/tests/date.test.ts](worker/tests/date.test.ts) — Date utility tests
+- [worker/tests/proxy-auth.test.ts](worker/tests/proxy-auth.test.ts) — Proxy signature enforcement mode tests
 - [worker/tests/unit/](worker/tests/unit/) — Unit tests directory
 - [worker/tests/integration/](worker/tests/integration/) — Integration tests directory
 - [apps/admin/src/components/__tests__/](apps/admin/src/components/__tests__/) — Component tests directory
@@ -198,6 +208,8 @@ After each issue fix, run these verification tests:
 | ISS-008/ISS-009 (Remix cleanup) | M-31, M-32 + verify `NavMenu` links open real SPA paths |
 | ISS-014 (CORS) | M-27 + verify admin SPA still works from allowed origin |
 | ISS-015 (Proxy signatures) | M-28 + verify storefront widget still works through App Proxy |
+| ISS-016 (Per-shop timezone) | M-04, M-17 + confirm lead-time/date rules match each shop timezone |
+| ISS-020 (API version consistency) | Run worker tests + spot-check webhook registration/fulfillment/graphql endpoints use centralized version constant |
 | ISS-021 (WAITLIST) | M-07 + verify other status tabs unaffected |
 
 ---

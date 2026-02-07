@@ -13,11 +13,13 @@ Defined in [worker/src/index.ts](worker/src/index.ts#L28-L42):
 | `GET /auth` | `handleAuth` | None (initiates OAuth) |
 | `GET /auth/callback` | `handleAuthCallback` | HMAC-verified |
 | `/webhooks/*` | `handleWebhook` | HMAC header verification |
-| `/proxy/*` | `handleProxyRequest` | Shopify App Proxy signature (partially enforced) |
+| `/proxy/*` | `handleProxyRequest` | Shopify App Proxy signature (enforced for all routes in production/staging) |
 | `/admin/*` | `handleAdminRequest` | JWT Session Token (Bearer) |
 | `OPTIONS *` | CORS preflight | None |
 
-Global CORS: `Access-Control-Allow-Origin: *` applied to ALL responses ([index.ts](worker/src/index.ts#L13)).
+Global CORS behavior:
+- `/admin/*`: restricted to configured trusted origin(s) outside dev mode (`ADMIN_ALLOWED_ORIGINS`).
+- Non-admin routes: wildcard CORS remains enabled.
 
 ---
 
@@ -133,7 +135,7 @@ All prefixed with `/admin`. Auth: JWT session token via `Authorization: Bearer <
 }
 ```
 - **Notes:**
-  - Uses GraphQL API (`2025-10`), fetches first 50 products sorted by title.
+  - Uses GraphQL API via centralized `SHOPIFY_ADMIN_API_VERSION`, fetches first 50 products sorted by title.
   - Converts Shopify GID to numeric ID (`.split('/').pop()`).
   - Requires access token — either from `shops.access_token` or via token exchange.
 
@@ -266,7 +268,7 @@ All prefixed with `/admin`. Auth: JWT session token via `Authorization: Bearer <
 ```
 - **Validation/Rules enforced:**
   - Validates required fields and item shape (`qty >= 1`, positive ids).
-  - Validates dates with store timezone rules (`STORE_TIMEZONE`) and location lead-time/min-duration.
+  - Validates dates with per-shop timezone rules (`shops.timezone`) and location lead-time/min-duration.
   - Validates location is active and products are rentable/configured.
   - Uses fail-fast SQL reservation strategy on `inventory_day` to prevent overselling.
 - **Capacity conflict behavior:** Returns `409` with `"Insufficient capacity"`.
@@ -288,7 +290,7 @@ All prefixed with `/admin`. Auth: JWT session token via `Authorization: Bearer <
 }
 ```
 - **Side Effects:**
-  1. Calls Shopify Fulfillment API (`2025-10`) to fulfill the order.
+  1. Calls Shopify Fulfillment API (centralized `SHOPIFY_ADMIN_API_VERSION`) to fulfill the order.
   2. Updates booking status to `RELEASED`.
 - **⚠️ Issue:** Sets status to `RELEASED` even if Shopify fulfillment fails (L937–940). The `fulfillment.success` flag in the response may be `false`.
 - **Audit Status (2026-02-07):** M3 frontend now shows explicit success/error toast feedback and handles `fulfillment.success=false` as a surfaced failure state for admins.
@@ -437,7 +439,7 @@ All prefixed with `/admin`. Auth: JWT session token via `Authorization: Bearer <
 
 ## 3. Proxy Endpoints (Storefront)
 
-All prefixed with `/proxy`. Auth: Shopify App Proxy signature (only enforced for `/agreement/sign`; see ISS-015).
+All prefixed with `/proxy`. Auth: Shopify App Proxy signature (enforced for all routes in production/staging, skipped in `ENVIRONMENT=dev` for local compatibility).
 
 All proxy endpoints require `?shop=<domain>` query parameter.
 
@@ -526,7 +528,7 @@ All proxy endpoints require `?shop=<domain>` query parameter.
 
 #### `POST /proxy/agreement/sign`
 - **Handler:** `handleAgreementSign` ([proxy.ts](worker/src/proxy.ts))
-- **Auth:** Shopify App Proxy HMAC signature verified (in production).
+- **Auth:** Shopify App Proxy HMAC signature verified (production/staging; dev skipped by design).
 - **Request Body:**
 ```json
 {
@@ -569,8 +571,8 @@ All proxy endpoints require `?shop=<domain>` query parameter.
 - **Side Effects:**
   1. Verifies HMAC.
   2. Exchanges code for access token.
-  3. Upserts shop in D1 (stores `access_token`, `scope`).
-  4. Registers webhooks for `orders/paid` and `app/uninstalled` (API version `2026-04`).
+  3. Fetches shop timezone (`shop.iana_timezone`) from Shopify and upserts shop in D1 (stores `access_token`, `timezone`).
+  4. Registers webhooks for `orders/paid` and `app/uninstalled` using centralized `SHOPIFY_ADMIN_API_VERSION`.
   5. Redirects to Shopify admin for the app.
 
 ---
@@ -612,15 +614,9 @@ All proxy endpoints require `?shop=<domain>` query parameter.
 | `POST /admin/bookings/:token/complete` | Sets booking to `RELEASED` regardless of fulfillment success. Response includes `fulfillment.success: false` but DB state is already changed (frontend now surfaces this with explicit error toast). |
 | `GET /admin/dashboard` | `productStats` returns `product_id` + `count` with no title. M4 frontend now enriches labels via `/shopify-products`, but the endpoint itself still omits names. |
 
-### 7.4 API Version Inconsistency
+### 7.4 API Version Consistency (Post-M6)
 
-| Context | Version |
-|---|---|
-| Webhook registration (`auth.ts` L238) | `2026-04` |
-| Fulfillment API (`admin.ts` L942) | `2025-10` |
-| GraphQL product fetch (`admin.ts` L1005) | `2025-10` |
-
-Should be centralized in `config.ts`.
+Worker-side Shopify API calls are now centralized via `SHOPIFY_ADMIN_API_VERSION` in `worker/src/config.ts` (webhook registration, fulfillment, GraphQL product fetch, and order cancellation).
 
 ---
 

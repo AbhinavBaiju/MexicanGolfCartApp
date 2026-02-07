@@ -8,7 +8,7 @@ import {
     listDateStrings,
     parseDateParts,
 } from './date';
-import { STORE_TIMEZONE } from './config';
+import { isDevEnvironment, normalizeStoreTimezone, SHOPIFY_ADMIN_API_VERSION } from './config';
 
 interface AvailabilityResponse {
     ok: boolean;
@@ -70,9 +70,7 @@ export async function handleProxyRequest(request: Request, env: Env): Promise<Re
         });
     }
 
-    const isAgreementSign = url.pathname.endsWith('/agreement/sign');
-    const isDev = env.ENVIRONMENT === 'dev';
-    if (isAgreementSign && !isDev) {
+    if (!isDevEnvironment(env.ENVIRONMENT)) {
         const valid = await verifyProxySignature(request, env.SHOPIFY_API_SECRET);
         if (!valid) {
             return new Response('Invalid signature', { status: 401, headers: corsHeaders });
@@ -168,13 +166,14 @@ async function handleAvailability(request: Request, env: Env, shopDomain: string
     }
 
     try {
-        const shopStmt = await env.DB.prepare('SELECT id FROM shops WHERE shop_domain = ?')
+        const shopStmt = await env.DB.prepare('SELECT id, timezone FROM shops WHERE shop_domain = ?')
             .bind(shopDomain)
             .first();
         if (!shopStmt) {
             return Response.json({ ok: false, error: 'Shop not found' }, { status: 404 });
         }
         const shopId = shopStmt.id as number;
+        const shopTimezone = normalizeStoreTimezone(shopStmt.timezone);
 
         if (locationCode) {
             const locStmt = await env.DB.prepare(
@@ -186,7 +185,7 @@ async function handleAvailability(request: Request, env: Env, shopDomain: string
                 return Response.json({ ok: false, error: 'Invalid location' }, { status: 400 });
             }
 
-            const todayStr = getTodayInTimeZone(STORE_TIMEZONE);
+            const todayStr = getTodayInTimeZone(shopTimezone);
             const todayParts = parseDateParts(todayStr);
             if (!todayParts) {
                 return Response.json({ ok: false, error: 'Failed to read store date' }, { status: 500 });
@@ -282,13 +281,14 @@ async function handleHold(request: Request, env: Env, shopDomain: string): Promi
     }
 
     try {
-        const shopStmt = await env.DB.prepare('SELECT id FROM shops WHERE shop_domain = ?')
+        const shopStmt = await env.DB.prepare('SELECT id, timezone FROM shops WHERE shop_domain = ?')
             .bind(shopDomain)
             .first();
         if (!shopStmt) {
             return Response.json({ ok: false, error: 'Shop not found' }, { status: 404 });
         }
         const shopId = shopStmt.id as number;
+        const shopTimezone = normalizeStoreTimezone(shopStmt.timezone);
 
         const location = await env.DB.prepare(
             'SELECT code, lead_time_days, min_duration_days FROM locations WHERE shop_id = ? AND code = ? AND active = 1'
@@ -310,7 +310,7 @@ async function handleHold(request: Request, env: Env, shopDomain: string): Promi
             return Response.json({ ok: false, error: 'Start date must be before end date' }, { status: 400 });
         }
 
-        const todayStr = getTodayInTimeZone(STORE_TIMEZONE);
+        const todayStr = getTodayInTimeZone(shopTimezone);
         const todayParts = parseDateParts(todayStr);
         if (!todayParts) {
             return Response.json({ ok: false, error: 'Failed to read store date' }, { status: 500 });
@@ -508,7 +508,7 @@ async function handleConfig(env: Env, shopDomain: string): Promise<Response> {
             `;
 
             try {
-                const shopifyRes = await fetch(`https://${shopDomain}/admin/api/2025-10/graphql.json`, {
+                const shopifyRes = await fetch(`https://${shopDomain}/admin/api/${SHOPIFY_ADMIN_API_VERSION}/graphql.json`, {
                     method: 'POST',
                     headers: {
                         'X-Shopify-Access-Token': accessToken,

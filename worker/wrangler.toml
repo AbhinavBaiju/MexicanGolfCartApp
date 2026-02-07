@@ -10,6 +10,7 @@ crons = ["*/5 * * * *"]
 ENVIRONMENT = "production"
 SHOPIFY_API_KEY = "ec7f70d8e7c5f2ec9cb8b6811b23e491" # Matches client_id in shopify.app.toml
 SHOPIFY_APP_URL = "https://mexican-golf-cart-worker.explaincaption.workers.dev"
+ADMIN_ALLOWED_ORIGINS = "https://master.mexican-golf-cart-admin.pages.dev"
 
 
 [[d1_databases]]
@@ -23,6 +24,7 @@ database_id = "61380274-7091-41f0-b6b1-eb0a587a7687"
 ENVIRONMENT = "dev"
 SHOPIFY_API_KEY = "ec7f70d8e7c5f2ec9cb8b6811b23e491"
 SHOPIFY_APP_URL = "https://mexican-golf-cart-worker-dev.explaincaption.workers.dev"
+ADMIN_ALLOWED_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000"
 [[env.dev.d1_databases]]
 binding = "DB"
 database_name = "mexican-golf-cart-db-dev"
@@ -32,6 +34,7 @@ database_id = "73603dc3-c26d-4b7a-951a-71afce999e4a"
 [env.staging]
 [env.staging.vars]
 ENVIRONMENT = "staging"
+ADMIN_ALLOWED_ORIGINS = "https://master.mexican-golf-cart-admin.pages.dev"
 [[env.staging.d1_databases]]
 binding = "DB"
 database_name = "mexican-golf-cart-db-staging"

@@ -1,6 +1,6 @@
 import { Env } from './types';
 import { datePartsToIndex, getTodayInTimeZone, parseDateParts } from './date';
-import { STORE_TIMEZONE } from './config';
+import { DEFAULT_STORE_TIMEZONE, normalizeStoreTimezone, SHOPIFY_ADMIN_API_VERSION } from './config';
 
 export type ReleaseTargetStatus = 'RELEASED' | 'EXPIRED';
 
@@ -497,7 +497,7 @@ async function cancelShopifyOrder(
         }
 
         const response = await fetch(
-            `https://${shopAuth.shop_domain}/admin/api/2024-04/orders/${orderId}/cancel.json`,
+            `https://${shopAuth.shop_domain}/admin/api/${SHOPIFY_ADMIN_API_VERSION}/orders/${orderId}/cancel.json`,
             {
                 method: 'POST',
                 headers: {
@@ -575,7 +575,8 @@ async function validateBookingDateRules(
         return 'Location rules missing';
     }
 
-    const todayStr = getTodayInTimeZone(STORE_TIMEZONE);
+    const timezone = await fetchShopTimezoneById(db, shopId);
+    const todayStr = getTodayInTimeZone(timezone);
     const todayParts = parseDateParts(todayStr);
     if (!todayParts) {
         return 'Failed to read store date';
@@ -613,6 +614,17 @@ async function fetchLocationRules(
         return null;
     }
     return { leadTimeDays, minDurationDays };
+}
+
+async function fetchShopTimezoneById(db: D1Database, shopId: number): Promise<string> {
+    const row = await db
+        .prepare('SELECT timezone FROM shops WHERE id = ?')
+        .bind(shopId)
+        .first();
+    if (!isRecord(row)) {
+        return DEFAULT_STORE_TIMEZONE;
+    }
+    return normalizeStoreTimezone(row.timezone);
 }
 
 function validateBookingItemsMatch(bookingItems: BookingItemRow[], lineItemKeyQty: Map<string, number>): string | null {

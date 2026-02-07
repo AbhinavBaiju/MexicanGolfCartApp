@@ -290,6 +290,12 @@ Each entry represents a distinct issue found during the audit. Issues are ordere
 | **What's Needed to Fix** | Set CORS origin to `master.mexican-golf-cart-admin.pages.dev` (or dynamically match against allowed origins). |
 | **Owner Type** | Backend |
 
+**Implementation Update (2026-02-07):** Resolved in M6.
+- `worker/src/index.ts` now applies route-aware CORS policy:
+  - `/admin/*` is origin-restricted in production/staging.
+  - Dev mode remains permissive for tunnel compatibility.
+- `ADMIN_ALLOWED_ORIGINS` is now supported via worker env config.
+
 ---
 
 ## ISS-015: App Proxy Signature Verification Mostly Disabled
@@ -307,6 +313,10 @@ Each entry represents a distinct issue found during the audit. Issues are ordere
 | **What's Needed to Fix** | Enable signature verification for all proxy routes in production. |
 | **Owner Type** | Backend |
 
+**Implementation Update (2026-02-07):** Resolved in M6.
+- `worker/src/proxy.ts` now enforces Shopify App Proxy signature validation for all `/proxy/*` routes when `ENVIRONMENT !== dev`.
+- Added worker tests in `worker/tests/proxy-auth.test.ts` to verify missing signatures are rejected across all proxy endpoints in production mode.
+
 ---
 
 ## ISS-016: Store Timezone Never Populated in shops Table
@@ -323,6 +333,10 @@ Each entry represents a distinct issue found during the audit. Issues are ordere
 | **Impact** | Single-shop deployment works fine with the hardcoded value. Multi-shop would have incorrect date logic. |
 | **What's Needed to Fix** | Fetch shop timezone from Shopify Admin API (`shop.iana_timezone`) during OAuth callback and store it. |
 | **Owner Type** | Backend |
+
+**Implementation Update (2026-02-07):** Resolved in M6.
+- OAuth callback (`worker/src/auth.ts`) now fetches `shop.iana_timezone` from Shopify (`/shop.json`) and persists it in `shops.timezone`.
+- Admin/proxy/webhook booking date-rule logic now uses per-shop timezone with validated fallback, replacing hardcoded global timezone dependence.
 
 ---
 
@@ -409,6 +423,10 @@ Each entry represents a distinct issue found during the audit. Issues are ordere
 | **Impact** | Low — likely works fine, but version inconsistency could cause subtle issues with response shapes or deprecated fields. |
 | **What's Needed to Fix** | Centralize API version to a single constant in `config.ts`. |
 | **Owner Type** | Backend |
+
+**Implementation Update (2026-02-07):** Resolved in M6.
+- Added centralized `SHOPIFY_ADMIN_API_VERSION` constant in `worker/src/config.ts`.
+- Updated worker-side webhook registration, fulfillment, GraphQL, and order-cancel API calls to use the centralized version constant.
 
 ---
 

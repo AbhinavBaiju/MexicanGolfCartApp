@@ -12,13 +12,14 @@
 - Milestone implementation handoff log: [docs/audit/09-m3-implementation-log.md](docs/audit/09-m3-implementation-log.md)
 - Milestone implementation handoff log: [docs/audit/11-m4-implementation-log.md](docs/audit/11-m4-implementation-log.md)
 - Milestone implementation handoff log: [docs/audit/14-m5-implementation-log.md](docs/audit/14-m5-implementation-log.md)
+- Milestone implementation handoff log: [docs/audit/17-m6-implementation-log.md](docs/audit/17-m6-implementation-log.md)
 
 ## System Snapshot (from the docs)
 - Stack: Vite+React+Polaris admin SPA (Cloudflare Pages), Cloudflare Worker + D1 backend, Shopify Remix shell for OAuth/tunnel, App Bridge v4 for auth.
 - Truth source: Worker/D1; storefront proxy handles holds; admin SPA uses `/admin/*` JWT endpoints.
 - Biggest broken UX (historical): Bookings page filters/export/manual booking, stub buttons (Manage, FAQ, New service), Remix placeholder routes.
-- Remaining high-priority work: Security hardening (CORS/proxy signature), per-shop timezone persistence, and API version consistency.
-- Security gaps: wildcard CORS, proxy HMAC only on agreement/sign, SHOPIFY_API_SECRET must be a secret (not in wrangler.toml), store timezone hardcoded.
+- Remaining high-priority work: Regression test expansion and automation hardening (M7).
+- Security posture: M6 removed wildcard admin CORS, enabled proxy HMAC verification in production for all `/proxy/*` routes, and moved date rules to per-shop timezone. `SHOPIFY_API_SECRET` still must be managed as a Cloudflare secret (not in `wrangler.toml`).
 
 ## Milestones for Implementation
 M0 – Baseline & Secrets
@@ -61,6 +62,7 @@ M6 – Security & Proxy Hardening (ISS-014/015/016/020)
 - Restrict CORS to admin origin; enforce App Proxy HMAC on all `/proxy/*` routes in production.
 - Persist store timezone during OAuth (`shop.iana_timezone`) into `shops.timezone`; use per-shop tz in date logic.
 - Centralize Shopify API version constants to avoid mismatches.
+Status: Completed on 2026-02-07. See [docs/audit/17-m6-implementation-log.md](docs/audit/17-m6-implementation-log.md).
 
 M7 – Testing & Regression Guardrails
 - Backend: add booking filter coverage, manual booking creation, proxy HMAC, inventory conflict tests (see P0 list in [docs/audit/05-test-and-verification-plan.md](docs/audit/05-test-and-verification-plan.md)).

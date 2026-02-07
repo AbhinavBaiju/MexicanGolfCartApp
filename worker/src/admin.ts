@@ -2,11 +2,12 @@ import { Env } from './types';
 import { SessionTokenPayload, verifySessionToken } from './auth';
 import { checkRateLimit } from './rateLimit';
 import { datePartsToIndex, listDateStrings, parseDateParts, getTodayInTimeZone } from './date';
-import { STORE_TIMEZONE } from './config';
+import { DEFAULT_STORE_TIMEZONE, normalizeStoreTimezone, SHOPIFY_ADMIN_API_VERSION } from './config';
 
 interface AdminAuthContext {
     shopId: number;
     shopDomain: string;
+    shopTimezone: string;
     payload: SessionTokenPayload;
     /** The raw session token (JWT) used for token exchange if an access_token is needed. */
     sessionToken: string;
@@ -185,16 +186,16 @@ export async function handleAdminRequest(request: Request, env: Env): Promise<Re
 
     if (segments.length === 1 && segments[0] === 'bookings') {
         if (method === 'GET') {
-            return handleBookingsGet(request, env, auth.shopId);
+            return handleBookingsGet(request, env, auth);
         }
         if (method === 'POST') {
-            return handleBookingsPost(request, env, auth.shopId);
+            return handleBookingsPost(request, env, auth);
         }
     }
 
     if (segments.length === 1 && segments[0] === 'dashboard') {
         if (method === 'GET') {
-            return handleDashboardGet(env, auth.shopId);
+            return handleDashboardGet(env, auth);
         }
     }
 
@@ -273,7 +274,7 @@ async function requireAdminAuth(request: Request, env: Env): Promise<Response | 
         return jsonError('Invalid token destination', 401);
     }
 
-    let shopRow = await env.DB.prepare('SELECT id FROM shops WHERE shop_domain = ? AND uninstalled_at IS NULL')
+    let shopRow = await env.DB.prepare('SELECT id, timezone FROM shops WHERE shop_domain = ? AND uninstalled_at IS NULL')
         .bind(shopDomain)
         .first();
 
@@ -283,14 +284,14 @@ async function requireAdminAuth(request: Request, env: Env): Promise<Response | 
         // handles OAuth via Prisma; the worker's D1 may not have the row yet.
         try {
             await env.DB.prepare(
-                `INSERT INTO shops (shop_domain, installed_at)
-                 VALUES (?, datetime('now'))
+                `INSERT INTO shops (shop_domain, installed_at, timezone)
+                 VALUES (?, datetime('now'), ?)
                  ON CONFLICT(shop_domain) DO UPDATE SET uninstalled_at = NULL`
             )
-                .bind(shopDomain)
+                .bind(shopDomain, DEFAULT_STORE_TIMEZONE)
                 .run();
 
-            shopRow = await env.DB.prepare('SELECT id FROM shops WHERE shop_domain = ?')
+            shopRow = await env.DB.prepare('SELECT id, timezone FROM shops WHERE shop_domain = ?')
                 .bind(shopDomain)
                 .first();
         } catch (e) {
@@ -302,9 +303,14 @@ async function requireAdminAuth(request: Request, env: Env): Promise<Response | 
         }
     }
 
+    const shopTimezone = shopRow && isRecord(shopRow)
+        ? normalizeStoreTimezone(shopRow.timezone)
+        : DEFAULT_STORE_TIMEZONE;
+
     return {
         shopId: shopRow.id as number,
         shopDomain,
+        shopTimezone,
         payload,
         sessionToken: token,
     };
@@ -584,7 +590,8 @@ async function handleInventoryPut(request: Request, env: Env, shopId: number): P
     return Response.json({ ok: true });
 }
 
-async function handleBookingsPost(request: Request, env: Env, shopId: number): Promise<Response> {
+async function handleBookingsPost(request: Request, env: Env, auth: AdminAuthContext): Promise<Response> {
+    const shopId = auth.shopId;
     const body = await readJsonBody(request);
     if (!body) {
         return jsonError('Invalid JSON body', 400);
@@ -616,7 +623,7 @@ async function handleBookingsPost(request: Request, env: Env, shopId: number): P
         return jsonError('Start date must be before end date', 400);
     }
 
-    const todayStr = getTodayInTimeZone(STORE_TIMEZONE);
+    const todayStr = getTodayInTimeZone(auth.shopTimezone);
     const todayParts = parseDateParts(todayStr);
     if (!todayParts) {
         return jsonError('Failed to read store date', 500);
@@ -819,7 +826,8 @@ async function handleBookingsPost(request: Request, env: Env, shopId: number): P
     });
 }
 
-async function handleBookingsGet(request: Request, env: Env, shopId: number): Promise<Response> {
+async function handleBookingsGet(request: Request, env: Env, auth: AdminAuthContext): Promise<Response> {
+    const shopId = auth.shopId;
     // NOTE: This endpoint intentionally returns a flattened list for the admin UI.
     const url = new URL(request.url);
     const status = url.searchParams.get('status');
@@ -865,10 +873,6 @@ async function handleBookingsGet(request: Request, env: Env, shopId: number): Pr
 
     const schema = await getBookingQuerySchema(env.DB);
 
-    // Look up the shop domain once so we can join to signed_agreements (keyed by shop_domain).
-    const shopRow = await env.DB.prepare('SELECT shop_domain FROM shops WHERE id = ?').bind(shopId).first();
-    const shopDomain = shopRow && isRecord(shopRow) ? (shopRow.shop_domain as string | null) : null;
-
     const selectColumns = [
         'b.booking_token',
         'b.status',
@@ -904,7 +908,7 @@ async function handleBookingsGet(request: Request, env: Env, shopId: number): Pr
     sql += `
          WHERE b.shop_id = ?`;
 
-    const bindings: (string | number)[] = schema.hasSignedAgreements ? [shopDomain ?? '', shopId] : [shopId];
+    const bindings: (string | number)[] = schema.hasSignedAgreements ? [auth.shopDomain, shopId] : [shopId];
     if (status) {
         sql += ' AND b.status = ?';
         bindings.push(status);
@@ -919,7 +923,7 @@ async function handleBookingsGet(request: Request, env: Env, shopId: number): Pr
     }
     if (datePreset === 'upcoming') {
         sql += ' AND b.start_date >= ?';
-        bindings.push(getTodayInTimeZone(STORE_TIMEZONE));
+        bindings.push(getTodayInTimeZone(auth.shopTimezone));
     }
     if (locationCode && locationCode.trim().length > 0) {
         sql += ' AND b.location_code = ?';
@@ -1074,8 +1078,9 @@ async function handleBookingGet(env: Env, shopId: number, bookingToken: string):
     });
 }
 
-async function handleDashboardGet(env: Env, shopId: number): Promise<Response> {
-    const today = getTodayInTimeZone(STORE_TIMEZONE);
+async function handleDashboardGet(env: Env, auth: AdminAuthContext): Promise<Response> {
+    const shopId = auth.shopId;
+    const today = getTodayInTimeZone(auth.shopTimezone);
     const schema = await getBookingQuerySchema(env.DB);
 
     // activeBookings: CONFIRMED and overlapping today
@@ -1202,7 +1207,7 @@ async function fulfillShopifyOrder(env: Env, auth: AdminAuthContext, orderId: nu
     const accessToken = await getShopAccessToken(env, auth.shopId, auth.shopDomain, auth.sessionToken);
     if (!accessToken) return { success: false, message: 'Unable to obtain access token' };
 
-    const apiVersion = '2025-10';
+    const apiVersion = SHOPIFY_ADMIN_API_VERSION;
 
     const foRes = await fetch(`https://${auth.shopDomain}/admin/api/${apiVersion}/orders/${orderId}/fulfillment_orders.json`, {
         headers: { 'X-Shopify-Access-Token': accessToken }
@@ -1252,7 +1257,7 @@ async function handleShopifyProductsGet(env: Env, auth: AdminAuthContext): Promi
     const accessToken = await getShopAccessToken(env, auth.shopId, auth.shopDomain, auth.sessionToken);
     if (!accessToken) return jsonError('Unable to obtain Shopify access token. Please reinstall the app.', 502);
 
-    const apiVersion = '2025-10';
+    const apiVersion = SHOPIFY_ADMIN_API_VERSION;
 
     const query = `
     {

@@ -17,29 +17,43 @@ if (
   delete process.env.HOST;
 }
 
-const host = new URL(process.env.SHOPIFY_APP_URL || "http://localhost")
-  .hostname;
+function resolveAppHost(appUrl: string | undefined): string {
+  if (!appUrl) {
+    return "localhost";
+  }
 
-let hmrConfig;
-if (host === "localhost") {
-  hmrConfig = {
-    protocol: "ws",
-    host: "localhost",
-    port: 64999,
-    clientPort: 64999,
-  };
-} else {
-  hmrConfig = {
-    protocol: "wss",
-    host: host,
-    port: parseInt(process.env.FRONTEND_PORT!) || 8002,
-    clientPort: 443,
-  };
+  try {
+    return new URL(appUrl).hostname || "localhost";
+  } catch {
+    console.warn(
+      `[vite] Invalid SHOPIFY_APP_URL "${appUrl}". Falling back to localhost for HMR and host checks.`,
+    );
+    return "localhost";
+  }
 }
+
+const host = resolveAppHost(process.env.SHOPIFY_APP_URL);
+const isLocalHost = host === "localhost" || host === "127.0.0.1";
+const frontendPort = Number.parseInt(process.env.FRONTEND_PORT ?? "8002", 10);
+const resolvedFrontendPort = Number.isNaN(frontendPort) ? 8002 : frontendPort;
+
+const hmrConfig = isLocalHost
+  ? {
+      protocol: "ws",
+      host: "localhost",
+      port: 64999,
+      clientPort: 64999,
+    }
+  : {
+      protocol: "wss",
+      host,
+      port: resolvedFrontendPort,
+      clientPort: 443,
+    };
 
 export default defineConfig({
   server: {
-    allowedHosts: [host],
+    allowedHosts: Array.from(new Set(["localhost", "127.0.0.1", host])),
     cors: {
       preflightContinue: true,
     },

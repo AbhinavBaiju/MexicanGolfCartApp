@@ -3,5 +3,5 @@ roles = ["frontend", "backend"]
 webhooks_path = "/webhooks/app/uninstalled"
 
 [commands]
-predev = "npx prisma generate"
+predev = "node ./scripts/verify-dev-env.mjs && npx prisma generate"
 dev = "bash ../../../scripts/dev-shopify-admin.sh"

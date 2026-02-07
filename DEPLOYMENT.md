@@ -8,6 +8,36 @@ The admin app is hosted on Cloudflare Pages. Since there is no automatic deploym
 - Production deploys use `apps/shopify/mexican-golf-cart/shopify.app.toml` with the Cloudflare Pages URL (`https://master.mexican-golf-cart-admin.pages.dev`).
 - `scripts/deploy.sh` validates and deploys using production config values; it does not use dev tunnel URLs.
 
+## Dev DB Snapshot Sync (Local Only)
+
+- `npm run dev` runs `dev:sync-db` before launching services.
+- The sync copies booking-domain tables from prod DB to dev DB for local hot-reload parity.
+- This behavior is local-development-only and is not part of production deployment.
+- `scripts/deploy.sh` does not invoke `dev:sync-db`.
+- To run sync manually:
+
+```bash
+npm run dev:sync-db
+```
+
+## Common Dev Failure: Wrong Store or Dead Tunnel
+
+If you see `*.trycloudflare.com ... server IP address could not be found`, check these first:
+
+1. Run `npm run dev` and note which dev store Shopify CLI selected.
+2. Open the embedded app in that exact store admin.
+3. Confirm `cloudflared` is installed (`cloudflared --version`).
+4. If `~/.cloudflared/config.yml` or `~/.cloudflared/config.yaml` exists, temporarily rename it while using Shopify dev.
+
+Quick Tunnel URLs are ephemeral, so restarting `shopify app dev` changes the hostname.
+
+## URL Responsibilities
+
+- `application_url` in `apps/shopify/mexican-golf-cart/shopify.app.toml` is the embedded admin app host for production.
+- During `shopify app dev --config dev`, Shopify CLI updates app URLs for the selected dev store only.
+- `app_proxy.url` and `auth.redirect_urls` point to Worker endpoints and stay separate from the admin host.
+- `SHOPIFY_APP_URL` must be set in the Remix runtime environment and should match the intended admin host for that environment.
+
 ## Prerequisites
 
 - Node.js and npm installed.

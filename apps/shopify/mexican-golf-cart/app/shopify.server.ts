@@ -7,12 +7,30 @@ import {
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
 import prisma from "./db.server";
 
+const appUrl = process.env.SHOPIFY_APP_URL;
+
+if (process.env.NODE_ENV === "production") {
+  if (!appUrl) {
+    throw new Error(
+      "Missing SHOPIFY_APP_URL in production. Set it to the deployed embedded app URL.",
+    );
+  }
+
+  try {
+    new URL(appUrl);
+  } catch {
+    throw new Error(
+      `Invalid SHOPIFY_APP_URL in production: ${appUrl}. Expected an absolute https URL.`,
+    );
+  }
+}
+
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
   apiSecretKey: process.env.SHOPIFY_API_SECRET || "",
   apiVersion: ApiVersion.January25,
   scopes: process.env.SCOPES?.split(","),
-  appUrl: process.env.SHOPIFY_APP_URL || "",
+  appUrl: appUrl || "",
   authPathPrefix: "/auth",
   sessionStorage: new PrismaSessionStorage(prisma),
   distribution: AppDistribution.AppStore,

@@ -4,6 +4,21 @@ interface ShopifyAppBridge {
     idToken: () => Promise<string>;
 }
 
+const resolvedWorkerBaseUrl = (
+    import.meta.env.VITE_WORKER_ADMIN_BASE_URL ??
+    'https://mexican-golf-cart-worker.explaincaption.workers.dev'
+).replace(/\/$/, '');
+
+const resolvedWorkerHost = (() => {
+    try {
+        return new URL(resolvedWorkerBaseUrl).host;
+    } catch {
+        return 'invalid-worker-base-url';
+    }
+})();
+
+console.info(`[api] Worker admin base URL: ${resolvedWorkerBaseUrl} (host: ${resolvedWorkerHost})`);
+
 function getShopifyAppBridge(): ShopifyAppBridge {
     if (typeof window === 'undefined') {
         throw new Error('Shopify App Bridge is not available in a server environment.');
@@ -34,19 +49,28 @@ export function useAuthenticatedFetch() {
         }
 
         const path = url.startsWith('/') ? url : `/${url}`;
-        const baseUrl = (
-            import.meta.env.VITE_WORKER_ADMIN_BASE_URL ??
-            'https://mexican-golf-cart-worker.explaincaption.workers.dev'
-        ).replace(/\/$/, '');
-        const fullUrl = `${baseUrl}/admin${path}`;
+        const fullUrl = `${resolvedWorkerBaseUrl}/admin${path}`;
+        let response: Response;
 
-        const response = await fetch(fullUrl, {
-            ...options,
-            headers,
-        });
+        try {
+            response = await fetch(fullUrl, {
+                ...options,
+                headers,
+            });
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            throw new Error(
+                `Failed to reach Worker admin API (${resolvedWorkerHost}) for ${path}: ${message}`
+            );
+        }
 
         if (response.status === 401) {
             console.error('Authenticated request failed: 401');
+        }
+        if (response.status >= 500) {
+            console.error(
+                `Worker admin API error ${response.status} from ${resolvedWorkerHost} for ${path}`
+            );
         }
 
         return response;

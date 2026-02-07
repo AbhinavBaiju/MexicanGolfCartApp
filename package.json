@@ -9,7 +9,8 @@
         "shared"
     ],
     "scripts": {
-        "dev": "concurrently --kill-others-on-fail --names \"worker,shopify,pages\" --prefix-colors \"blue,green,magenta\" \"npm run dev:worker\" \"npm run dev:shopify\" \"npm run dev:pages\"",
+        "dev": "npm run dev:sync-db && concurrently --kill-others-on-fail --names \"worker,shopify,pages\" --prefix-colors \"blue,green,magenta\" \"npm run dev:worker\" \"npm run dev:shopify\" \"npm run dev:pages\"",
+        "dev:sync-db": "node scripts/sync-dev-db-from-prod.mjs",
         "dev:shopify": "cd apps/shopify/mexican-golf-cart && npm run dev -- --config dev",
         "dev:worker": "node scripts/dev-worker-live.mjs",
         "dev:worker:local": "cd worker && npm run dev",

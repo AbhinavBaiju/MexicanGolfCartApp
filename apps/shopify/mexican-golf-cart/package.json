@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "build": "remix vite:build",
+    "predev": "node scripts/verify-dev-env.mjs",
     "dev": "shopify app dev",
     "config:link": "shopify app config link",
     "generate": "shopify app generate",

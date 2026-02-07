@@ -274,6 +274,7 @@ All prefixed with `/admin`. Auth: JWT session token via `Authorization: Bearer <
   2. Creates `booking_items` rows.
   3. Creates `booking_days` rows.
   4. Atomically increments `inventory_day.reserved_qty`.
+- **Audit Status (2026-02-07):** Re-verified against implementation in `worker/src/admin.ts`; contract is in sync with deployed M2 behavior.
 
 #### `POST /admin/bookings/:token/complete`
 - **Handler:** `handleBookingComplete` ([admin.ts](worker/src/admin.ts#L916))

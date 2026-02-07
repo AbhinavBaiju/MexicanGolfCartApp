@@ -40,6 +40,7 @@ Each entry represents a distinct issue found during the audit. Issues are ordere
 - Frontend: `apps/admin/src/pages/Bookings.tsx` now wires `+ Manual booking` to a working modal/form.
 - Backend: `worker/src/admin.ts` now implements `POST /admin/bookings`.
 - Endpoint performs store-timezone validation, lead-time/min-duration enforcement, and fail-fast atomic capacity reservation updates before creating `bookings`, `booking_items`, and `booking_days`.
+- Re-audit note (2026-02-07): implementation re-verified; no remaining M2 deltas found for ISS-002.
 
 ---
 

@@ -33,7 +33,7 @@ M2 – Manual Booking Creation (ISS-002)
 - Backend: add `POST /admin/bookings` to perform hold+confirm with capacity checks (reuse proxy hold logic) and create booking_items/days.
 - Frontend: add modal/form from "+ Manual booking" button; support product/variant selection, dates, location, quantity; show success/error toasts.
 - Ensure atomic inventory updates (fail-fast SQL) and store-timezone validation.
-Status: Completed on 2026-02-07. See [docs/audit/07-m2-implementation-log.md](docs/audit/07-m2-implementation-log.md).
+Status: Completed on 2026-02-07 and re-audited/signed off on 2026-02-07 (no M2 delta findings). See [docs/audit/07-m2-implementation-log.md](docs/audit/07-m2-implementation-log.md).
 
 M3 – Booking Management Flow (ISS-003/017/013/012)
 - Add booking detail view (modal or route) using `GET /admin/bookings/:token`; wire BookingCard "Manage" button.

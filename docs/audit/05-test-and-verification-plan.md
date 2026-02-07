@@ -13,6 +13,14 @@ Validation commands executed after M2:
 - `npm --workspace apps/admin run lint` (pass with one pre-existing warning in `apps/admin/src/pages/Agreement.tsx`)
 - `npm --workspace apps/admin run build` (pass)
 
+Re-validation executed on 2026-02-07 (post-audit):
+- `npx tsc -p worker/tsconfig.json` (pass)
+- `npm --workspace worker run test` (pass: 7 passed, 0 failed)
+- `npm --workspace apps/admin run lint` (pass with the same pre-existing warning in `apps/admin/src/pages/Agreement.tsx:353`)
+- `npm --workspace apps/admin run build` (pass)
+
+M2 verification status: **signed off** (no M2 delta findings).
+
 ---
 
 ## 1. Manual Test Checklist

@@ -58,6 +58,18 @@ interface ConfigProductRow {
     image_alt?: string | null;
 }
 
+interface FeaturedHomeProductConfigRow {
+    position: number;
+    product_id: number;
+}
+
+interface ShopifyProductMeta {
+    title?: string;
+    image_url?: string;
+    image_alt?: string | null;
+    first_variant_id?: number | null;
+}
+
 const HOLD_MINUTES = 20;
 const MAX_HOLD_RANGE_DAYS = 90;
 const MAX_HOLD_TOTAL_QTY = 10;
@@ -500,13 +512,16 @@ async function handleConfig(env: Env, shopDomain: string): Promise<Response> {
             .bind(shopId)
             .all();
 
-        const productsRows = await env.DB.prepare(
-            'SELECT product_id, variant_id, default_capacity, deposit_variant_id, deposit_multiplier FROM products WHERE shop_id = ? AND rentable = 1 ORDER BY product_id'
+        const rentableRows = await env.DB.prepare(
+            `SELECT product_id, variant_id, default_capacity, deposit_variant_id, deposit_multiplier
+             FROM products
+             WHERE shop_id = ? AND rentable = 1
+             ORDER BY product_id`
         )
             .bind(shopId)
             .all();
 
-        const products: ConfigProductRow[] = (productsRows.results ?? [])
+        const rentableProducts: ConfigProductRow[] = (rentableRows.results ?? [])
             .filter(isRecord)
             .map((row) => ({
                 product_id: toNumber(row.product_id) ?? 0,
@@ -517,112 +532,216 @@ async function handleConfig(env: Env, shopDomain: string): Promise<Response> {
             }))
             .filter((row) => Number.isInteger(row.product_id) && row.product_id > 0);
 
-        // Fetch product details from Shopify if we have products
-        if (products.length > 0) {
-            const productIds = products.map((p) => `gid://shopify/Product/${p.product_id}`);
-            const query = `
-            query ($ids: [ID!]!) {
-              nodes(ids: $ids) {
-                ... on Product {
-                  id
-                  title
-                  featuredImage {
-                    url
-                    altText
-                  }
-                  images(first: 1) {
-                    nodes {
-                      url
-                      altText
+        const featuredRows = await env.DB.prepare(
+            `SELECT position, product_id
+             FROM featured_home_products
+             WHERE shop_id = ?
+             ORDER BY position`
+        )
+            .bind(shopId)
+            .all();
+
+        const featuredConfigured: FeaturedHomeProductConfigRow[] = (featuredRows.results ?? [])
+            .filter(isRecord)
+            .map((row) => ({
+                position: toNumber(row.position) ?? 0,
+                product_id: toNumber(row.product_id) ?? 0,
+            }))
+            .filter(
+                (row): row is FeaturedHomeProductConfigRow =>
+                    Number.isInteger(row.position) &&
+                    row.position >= 1 &&
+                    row.position <= 3 &&
+                    Number.isInteger(row.product_id) &&
+                    row.product_id > 0
+            )
+            .sort((a, b) => a.position - b.position);
+
+        const featuredIdsConfigured = featuredConfigured.map((entry) => entry.product_id);
+        const featuredProductIds = featuredIdsConfigured.length === 3
+            ? featuredIdsConfigured
+            : rentableProducts.slice(0, 3).map((entry) => entry.product_id);
+
+        const productIdsToHydrate = Array.from(
+            new Set([
+                ...rentableProducts.map((entry) => entry.product_id),
+                ...featuredProductIds,
+            ])
+        );
+
+        const shopifyMetadata = await fetchShopifyProductMeta(
+            shopDomain,
+            accessToken,
+            productIdsToHydrate
+        );
+
+        const rentableById = new Map<number, ConfigProductRow>();
+        rentableProducts.forEach((entry) => {
+            const nextEntry: ConfigProductRow = { ...entry };
+            const meta = shopifyMetadata.get(entry.product_id);
+            if (meta?.title) {
+                nextEntry.title = meta.title;
+            } else {
+                nextEntry.title = `Product ${entry.product_id}`;
+            }
+            if (meta?.image_url) {
+                nextEntry.image_url = meta.image_url;
+                nextEntry.image_alt = meta.image_alt ?? null;
+            }
+            if (!nextEntry.variant_id && meta?.first_variant_id && meta.first_variant_id > 0) {
+                nextEntry.variant_id = meta.first_variant_id;
+            }
+            rentableById.set(entry.product_id, nextEntry);
+        });
+
+        const hydratedRentableProducts = Array.from(rentableById.values());
+        const featuredProducts = featuredProductIds
+            .map((productId) => rentableById.get(productId))
+            .filter((entry): entry is ConfigProductRow => Boolean(entry))
+            .filter((entry) => Boolean(entry.variant_id))
+            .slice(0, 3);
+
+        if (featuredProducts.length < 3 && hydratedRentableProducts.length > 0) {
+            const featuredIds = new Set(featuredProducts.map((entry) => entry.product_id));
+            hydratedRentableProducts
+                .filter((entry) => Boolean(entry.variant_id))
+                .forEach((entry) => {
+                    if (featuredProducts.length >= 3 || featuredIds.has(entry.product_id)) {
+                        return;
                     }
-                  }
-                }
-              }
-            }
-            `;
-
-            try {
-                const shopifyRes = await fetch(`https://${shopDomain}/admin/api/${SHOPIFY_ADMIN_API_VERSION}/graphql.json`, {
-                    method: 'POST',
-                    headers: {
-                        'X-Shopify-Access-Token': accessToken,
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        query,
-                        variables: { ids: productIds }
-                    }),
+                    featuredProducts.push(entry);
+                    featuredIds.add(entry.product_id);
                 });
-
-                if (shopifyRes.ok) {
-                    const shopifyData = await shopifyRes.json() as unknown;
-                    const nodes = isRecord(shopifyData) && isRecord(shopifyData.data) && Array.isArray(shopifyData.data.nodes)
-                        ? shopifyData.data.nodes
-                        : [];
-
-                    const titleMap = new Map<number, string>();
-                    const imageMap = new Map<number, { url: string; altText: string | null }>();
-
-                    nodes.forEach((node) => {
-                        if (!isRecord(node)) return;
-                        const idValue = node.id;
-                        const titleValue = node.title;
-                        if (typeof idValue !== 'string') return;
-
-                        const id = parseInt(idValue.split('/').pop() || '0');
-                        if (!Number.isFinite(id) || id <= 0) return;
-
-                        if (typeof titleValue === 'string' && titleValue.trim().length > 0) {
-                            titleMap.set(id, titleValue);
-                        }
-
-                        const images = node.images;
-                        const featuredImage = node.featuredImage;
-                        if (isRecord(featuredImage) && typeof featuredImage.url === 'string' && featuredImage.url.trim().length > 0) {
-                            imageMap.set(id, {
-                                url: featuredImage.url,
-                                altText: typeof featuredImage.altText === 'string' ? featuredImage.altText : null,
-                            });
-                            return;
-                        }
-
-                        if (isRecord(images) && Array.isArray(images.nodes) && images.nodes.length > 0) {
-                            const first = images.nodes[0];
-                            if (isRecord(first) && typeof first.url === 'string' && first.url.trim().length > 0) {
-                                imageMap.set(id, {
-                                    url: first.url,
-                                    altText: typeof first.altText === 'string' ? first.altText : null,
-                                });
-                            }
-                        }
-                    });
-
-                    // Merge titles/images into products
-                    products.forEach((p) => {
-                        p.title = titleMap.get(p.product_id) || p.title || `Product ${p.product_id}`;
-                        const img = imageMap.get(p.product_id);
-                        if (img) {
-                            p.image_url = img.url;
-                            p.image_alt = img.altText;
-                        }
-                    });
-                } else {
-                    console.error('Failed to fetch Shopify products', await shopifyRes.text());
-                }
-            } catch (err) {
-                console.error('Error fetching Shopify products', err);
-            }
         }
 
         return Response.json({
             ok: true,
             locations: locations.results ?? [],
-            products: products,
+            featured_products: featuredProducts,
+            rentable_products: hydratedRentableProducts,
+            products: hydratedRentableProducts,
         });
     } catch (e) {
         console.error('Config fetch failed', e);
         return Response.json({ ok: false, error: 'Internal Server Error' }, { status: 500 });
     }
+}
+
+async function fetchShopifyProductMeta(
+    shopDomain: string,
+    accessToken: string,
+    productIds: number[]
+): Promise<Map<number, ShopifyProductMeta>> {
+    const result = new Map<number, ShopifyProductMeta>();
+    if (!accessToken || productIds.length === 0) {
+        return result;
+    }
+
+    const ids = productIds
+        .filter((value) => Number.isInteger(value) && value > 0)
+        .map((value) => `gid://shopify/Product/${value}`);
+    if (ids.length === 0) {
+        return result;
+    }
+
+    const query = `
+    query RuntimeProducts($ids: [ID!]!) {
+      nodes(ids: $ids) {
+        ... on Product {
+          id
+          title
+          featuredImage {
+            url
+            altText
+          }
+          images(first: 1) {
+            nodes {
+              url
+              altText
+            }
+          }
+          variants(first: 1) {
+            nodes {
+              id
+            }
+          }
+        }
+      }
+    }
+    `;
+
+    try {
+        const shopifyRes = await fetch(`https://${shopDomain}/admin/api/${SHOPIFY_ADMIN_API_VERSION}/graphql.json`, {
+            method: 'POST',
+            headers: {
+                'X-Shopify-Access-Token': accessToken,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                query,
+                variables: { ids },
+            }),
+        });
+
+        if (!shopifyRes.ok) {
+            console.error('Failed to fetch Shopify products for config', await shopifyRes.text());
+            return result;
+        }
+
+        const shopifyData = await shopifyRes.json() as unknown;
+        const nodes = isRecord(shopifyData) && isRecord(shopifyData.data) && Array.isArray(shopifyData.data.nodes)
+            ? shopifyData.data.nodes
+            : [];
+
+        nodes.forEach((node) => {
+            if (!isRecord(node)) {
+                return;
+            }
+
+            const idValue = node.id;
+            if (typeof idValue !== 'string') {
+                return;
+            }
+
+            const productId = parseInt(idValue.split('/').pop() || '0', 10);
+            if (!Number.isInteger(productId) || productId <= 0) {
+                return;
+            }
+
+            const next: ShopifyProductMeta = {};
+            if (typeof node.title === 'string' && node.title.trim().length > 0) {
+                next.title = node.title;
+            }
+
+            const featuredImage = node.featuredImage;
+            if (isRecord(featuredImage) && typeof featuredImage.url === 'string' && featuredImage.url.trim().length > 0) {
+                next.image_url = featuredImage.url;
+                next.image_alt = typeof featuredImage.altText === 'string' ? featuredImage.altText : null;
+            } else if (isRecord(node.images) && Array.isArray(node.images.nodes) && node.images.nodes.length > 0) {
+                const first = node.images.nodes[0];
+                if (isRecord(first) && typeof first.url === 'string' && first.url.trim().length > 0) {
+                    next.image_url = first.url;
+                    next.image_alt = typeof first.altText === 'string' ? first.altText : null;
+                }
+            }
+
+            if (isRecord(node.variants) && Array.isArray(node.variants.nodes) && node.variants.nodes.length > 0) {
+                const firstVariant = node.variants.nodes[0];
+                if (isRecord(firstVariant) && typeof firstVariant.id === 'string') {
+                    const variantId = parseInt(firstVariant.id.split('/').pop() || '0', 10);
+                    if (Number.isInteger(variantId) && variantId > 0) {
+                        next.first_variant_id = variantId;
+                    }
+                }
+            }
+
+            result.set(productId, next);
+        });
+    } catch (error) {
+        console.error('Error fetching Shopify metadata for runtime config', error);
+    }
+
+    return result;
 }
 
 interface AgreementPublicResponse {

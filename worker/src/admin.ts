@@ -118,6 +118,41 @@ interface BookingQuerySchema {
     hasSignedAgreements: boolean;
 }
 
+interface FeaturedHomeProductRow {
+    position: number;
+    product_id: number;
+    variant_id: number | null;
+    rentable: number;
+}
+
+interface ProductTemplateSyncResult {
+    ok: boolean;
+    previousTemplateSuffix: string | null;
+    error?: string;
+}
+
+interface ShopifyProductTemplateSnapshot {
+    ok: boolean;
+    templateSuffix: string | null;
+    error?: string;
+}
+
+interface TemplateSyncProductRow {
+    product_id: number;
+    rentable: boolean;
+    previous_template_suffix: string | null;
+}
+
+interface TemplateSyncResultRow {
+    product_id: number;
+    rentable: boolean;
+    expected_template: string;
+    sync_ok: boolean;
+    error?: string;
+}
+
+const RENTALS_TEMPLATE_SUFFIX = 'rentals';
+
 /**
  * Booking status transitions (admin-facing operations):
  * HOLD -> CONFIRMED | RELEASED | EXPIRED | INVALID | CANCELLED
@@ -166,20 +201,35 @@ export async function handleAdminRequest(request: Request, env: Env): Promise<Re
         }
     }
 
+    if (segments.length === 1 && segments[0] === 'featured-home-products') {
+        if (method === 'GET') {
+            return handleFeaturedHomeProductsGet(env, auth.shopId);
+        }
+        if (method === 'PUT' || method === 'PATCH') {
+            return handleFeaturedHomeProductsPut(request, env, auth.shopId);
+        }
+    }
+
     if (segments.length === 2 && segments[0] === 'products') {
+        if (segments[1] === 'template-sync') {
+            if (method === 'POST') {
+                return handleProductsTemplateSync(request, env, auth);
+            }
+            return jsonError('Method Not Allowed', 405);
+        }
         if (method === 'PATCH') {
             const productId = parsePositiveInt(segments[1]);
             if (!productId) {
                 return jsonError('Invalid product id', 400);
             }
-            return handleProductsPatch(request, env, auth.shopId, productId);
+            return handleProductsPatch(request, env, auth, productId);
         }
         if (method === 'DELETE') {
             const productId = parsePositiveInt(segments[1]);
             if (!productId) {
                 return jsonError('Invalid product id', 400);
             }
-            return handleProductsDelete(env, auth.shopId, productId);
+            return handleProductsDelete(env, auth, productId);
         }
     }
 
@@ -418,7 +468,11 @@ async function handleLocationsPatch(
 
 async function handleProductsGet(env: Env, shopId: number): Promise<Response> {
     const rows = await env.DB.prepare(
-        'SELECT product_id, variant_id, rentable, default_capacity, deposit_variant_id, deposit_multiplier, updated_at FROM products WHERE shop_id = ? ORDER BY product_id'
+        `SELECT product_id, variant_id, rentable, default_capacity, deposit_variant_id,
+                deposit_multiplier, previous_template_suffix, updated_at
+         FROM products
+         WHERE shop_id = ?
+         ORDER BY product_id`
     )
         .bind(shopId)
         .all();
@@ -428,7 +482,7 @@ async function handleProductsGet(env: Env, shopId: number): Promise<Response> {
 async function handleProductsPatch(
     request: Request,
     env: Env,
-    shopId: number,
+    auth: AdminAuthContext,
     productId: number
 ): Promise<Response> {
     const body = await readJsonBody(request);
@@ -448,39 +502,368 @@ async function handleProductsPatch(
         return jsonError('Invalid deposit multiplier', 400);
     }
 
+    const existing = await env.DB.prepare(
+        `SELECT variant_id, rentable, default_capacity, deposit_variant_id, deposit_multiplier, previous_template_suffix
+         FROM products
+         WHERE shop_id = ? AND product_id = ?`
+    )
+        .bind(auth.shopId, productId)
+        .first();
+
+    const currentRentable = existing ? toBooleanFlag(existing.rentable) : false;
+    const nextRentable = rentable ?? currentRentable;
+    const nextVariantId = variantId ?? toNumber(existing?.variant_id) ?? null;
+    const nextDefaultCapacity = defaultCapacity ?? toNumber(existing?.default_capacity) ?? 0;
+    const nextDepositVariantId = depositVariantId ?? toNumber(existing?.deposit_variant_id) ?? null;
+    const nextDepositMultiplier = depositMultiplier ?? toNumber(existing?.deposit_multiplier) ?? 1;
+    let nextPreviousTemplateSuffix = normalizeTemplateSuffix(existing?.previous_template_suffix);
+
+    if (rentable !== undefined) {
+        const templateSync = await syncProductTemplateSuffixForRentable(
+            env,
+            auth,
+            productId,
+            nextRentable,
+            nextPreviousTemplateSuffix
+        );
+        if (!templateSync.ok) {
+            return jsonError(templateSync.error ?? 'Failed to sync Shopify product template', 502);
+        }
+        nextPreviousTemplateSuffix = templateSync.previousTemplateSuffix;
+    }
+
+    if (!Number.isInteger(nextDefaultCapacity) || nextDefaultCapacity < 0) {
+        return jsonError('Invalid default capacity', 400);
+    }
+    if (!Number.isInteger(nextDepositMultiplier) || nextDepositMultiplier < 1) {
+        return jsonError('Invalid deposit multiplier', 400);
+    }
+
     await env.DB.prepare(
         `INSERT INTO products (
             shop_id, product_id, variant_id, rentable, default_capacity,
-            deposit_variant_id, deposit_multiplier, updated_at
+            deposit_variant_id, deposit_multiplier, previous_template_suffix, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         ON CONFLICT(shop_id, product_id) DO UPDATE SET
-            variant_id = COALESCE(excluded.variant_id, products.variant_id),
-            rentable = COALESCE(excluded.rentable, products.rentable),
-            default_capacity = COALESCE(excluded.default_capacity, products.default_capacity),
-            deposit_variant_id = COALESCE(excluded.deposit_variant_id, products.deposit_variant_id),
-            deposit_multiplier = COALESCE(excluded.deposit_multiplier, products.deposit_multiplier),
+            variant_id = excluded.variant_id,
+            rentable = excluded.rentable,
+            default_capacity = excluded.default_capacity,
+            deposit_variant_id = excluded.deposit_variant_id,
+            deposit_multiplier = excluded.deposit_multiplier,
+            previous_template_suffix = excluded.previous_template_suffix,
             updated_at = datetime('now')`
     )
         .bind(
-            shopId,
+            auth.shopId,
             productId,
-            variantId ?? null,
-            rentable ?? null,
-            defaultCapacity ?? null,
-            depositVariantId ?? null,
-            depositMultiplier ?? null
+            nextVariantId,
+            nextRentable ? 1 : 0,
+            nextDefaultCapacity,
+            nextDepositVariantId,
+            nextDepositMultiplier,
+            nextPreviousTemplateSuffix
         )
         .run();
 
+    return Response.json({
+        ok: true,
+        product: {
+            product_id: productId,
+            variant_id: nextVariantId,
+            rentable: nextRentable ? 1 : 0,
+            default_capacity: nextDefaultCapacity,
+            deposit_variant_id: nextDepositVariantId,
+            deposit_multiplier: nextDepositMultiplier,
+            previous_template_suffix: nextPreviousTemplateSuffix,
+        },
+    });
+}
+
+async function handleProductsDelete(env: Env, auth: AdminAuthContext, productId: number): Promise<Response> {
+    const existing = await env.DB.prepare(
+        'SELECT rentable, previous_template_suffix FROM products WHERE shop_id = ? AND product_id = ?'
+    )
+        .bind(auth.shopId, productId)
+        .first();
+
+    if (existing && toBooleanFlag(existing.rentable)) {
+        const templateSync = await syncProductTemplateSuffixForRentable(
+            env,
+            auth,
+            productId,
+            false,
+            normalizeTemplateSuffix(existing.previous_template_suffix)
+        );
+        if (!templateSync.ok) {
+            return jsonError(templateSync.error ?? 'Failed to reset Shopify product template', 502);
+        }
+    }
+
+    await env.DB.prepare('DELETE FROM featured_home_products WHERE shop_id = ? AND product_id = ?')
+        .bind(auth.shopId, productId)
+        .run();
+
+    await env.DB.prepare('DELETE FROM products WHERE shop_id = ? AND product_id = ?')
+        .bind(auth.shopId, productId)
+        .run();
     return Response.json({ ok: true });
 }
 
-async function handleProductsDelete(env: Env, shopId: number, productId: number): Promise<Response> {
-    await env.DB.prepare('DELETE FROM products WHERE shop_id = ? AND product_id = ?')
-        .bind(shopId, productId)
-        .run();
-    return Response.json({ ok: true });
+async function handleProductsTemplateSync(
+    request: Request,
+    env: Env,
+    auth: AdminAuthContext
+): Promise<Response> {
+    const body = await readJsonBody(request);
+    if (!body) {
+        return jsonError('Invalid JSON body', 400);
+    }
+
+    const productIdsRaw = body.product_ids;
+    let requestedProductIds: number[] | null = null;
+    if (productIdsRaw !== undefined) {
+        if (!Array.isArray(productIdsRaw)) {
+            return jsonError('product_ids must be an array of positive integers', 400);
+        }
+        const parsed = new Set<number>();
+        for (const entry of productIdsRaw) {
+            if (typeof entry !== 'number' || !Number.isInteger(entry) || entry <= 0) {
+                return jsonError('product_ids must contain only positive integers', 400);
+            }
+            parsed.add(entry);
+        }
+        requestedProductIds = Array.from(parsed);
+    }
+
+    let productRows: TemplateSyncProductRow[] = [];
+    if (requestedProductIds && requestedProductIds.length > 0) {
+        const placeholders = requestedProductIds.map(() => '?').join(', ');
+        const rows = await env.DB.prepare(
+            `SELECT product_id, rentable, previous_template_suffix
+             FROM products
+             WHERE shop_id = ? AND product_id IN (${placeholders})`
+        )
+            .bind(auth.shopId, ...requestedProductIds)
+            .all();
+
+        productRows = (rows.results ?? [])
+            .filter(isRecord)
+            .map((row) => ({
+                product_id: toNumber(row.product_id) ?? 0,
+                rentable: toBooleanFlag(row.rentable),
+                previous_template_suffix: normalizeTemplateSuffix(row.previous_template_suffix),
+            }))
+            .filter((row) => Number.isInteger(row.product_id) && row.product_id > 0);
+    } else {
+        const rows = await env.DB.prepare(
+            `SELECT product_id, rentable, previous_template_suffix
+             FROM products
+             WHERE shop_id = ? AND rentable = 1
+             ORDER BY product_id`
+        )
+            .bind(auth.shopId)
+            .all();
+
+        productRows = (rows.results ?? [])
+            .filter(isRecord)
+            .map((row) => ({
+                product_id: toNumber(row.product_id) ?? 0,
+                rentable: toBooleanFlag(row.rentable),
+                previous_template_suffix: normalizeTemplateSuffix(row.previous_template_suffix),
+            }))
+            .filter((row) => Number.isInteger(row.product_id) && row.product_id > 0);
+    }
+
+    const rowMap = new Map<number, TemplateSyncProductRow>();
+    for (const row of productRows) {
+        rowMap.set(row.product_id, row);
+    }
+
+    const orderedRows: TemplateSyncProductRow[] = requestedProductIds
+        ? requestedProductIds
+            .map((productId) => rowMap.get(productId))
+            .filter((row): row is TemplateSyncProductRow => Boolean(row))
+        : productRows;
+
+    const results: TemplateSyncResultRow[] = [];
+    for (const row of orderedRows) {
+        const expectedTemplate = row.rentable
+            ? RENTALS_TEMPLATE_SUFFIX
+            : row.previous_template_suffix ?? 'default';
+
+        const syncResult = await syncProductTemplateSuffixForRentable(
+            env,
+            auth,
+            row.product_id,
+            row.rentable,
+            row.previous_template_suffix
+        );
+
+        if (!syncResult.ok) {
+            results.push({
+                product_id: row.product_id,
+                rentable: row.rentable,
+                expected_template: expectedTemplate,
+                sync_ok: false,
+                error: syncResult.error ?? 'Template sync failed',
+            });
+            continue;
+        }
+
+        await env.DB.prepare(
+            `UPDATE products
+             SET previous_template_suffix = ?, updated_at = datetime('now')
+             WHERE shop_id = ? AND product_id = ?`
+        )
+            .bind(syncResult.previousTemplateSuffix, auth.shopId, row.product_id)
+            .run();
+
+        results.push({
+            product_id: row.product_id,
+            rentable: row.rentable,
+            expected_template: expectedTemplate,
+            sync_ok: true,
+        });
+    }
+
+    if (requestedProductIds) {
+        for (const requestedId of requestedProductIds) {
+            if (rowMap.has(requestedId)) {
+                continue;
+            }
+            results.push({
+                product_id: requestedId,
+                rentable: false,
+                expected_template: 'default',
+                sync_ok: false,
+                error: 'Product is not configured',
+            });
+        }
+    }
+
+    return Response.json({ ok: true, results });
+}
+
+async function handleFeaturedHomeProductsGet(env: Env, shopId: number): Promise<Response> {
+    const rows = await env.DB.prepare(
+        `SELECT f.position, f.product_id, p.variant_id, p.rentable
+         FROM featured_home_products f
+         LEFT JOIN products p
+           ON p.shop_id = f.shop_id AND p.product_id = f.product_id
+         WHERE f.shop_id = ?
+         ORDER BY f.position ASC`
+    )
+        .bind(shopId)
+        .all();
+
+    const featured = (rows.results ?? [])
+        .filter(isRecord)
+        .map((row) => ({
+            position: toNumber(row.position) ?? 0,
+            product_id: toNumber(row.product_id) ?? 0,
+            variant_id: toNumber(row.variant_id),
+            rentable: toNumber(row.rentable) ?? 0,
+        }))
+        .filter(
+            (row): row is FeaturedHomeProductRow =>
+                Number.isInteger(row.position) &&
+                row.position >= 1 &&
+                row.position <= 3 &&
+                Number.isInteger(row.product_id) &&
+                row.product_id > 0
+        );
+
+    return Response.json({ ok: true, featured_home_products: featured });
+}
+
+async function handleFeaturedHomeProductsPut(
+    request: Request,
+    env: Env,
+    shopId: number
+): Promise<Response> {
+    const body = await readJsonBody(request);
+    if (!body) {
+        return jsonError('Invalid JSON body', 400);
+    }
+
+    const productIdsRaw = body.product_ids;
+    if (!Array.isArray(productIdsRaw) || productIdsRaw.length !== 3) {
+        return jsonError('Featured home products must contain exactly 3 product ids', 400);
+    }
+
+    const parsedProductIds: number[] = [];
+    for (const entry of productIdsRaw) {
+        if (typeof entry !== 'number' || !Number.isInteger(entry) || entry <= 0) {
+            return jsonError('Invalid product id in featured home products', 400);
+        }
+        parsedProductIds.push(entry);
+    }
+
+    const uniqueProductIds = new Set(parsedProductIds);
+    if (uniqueProductIds.size !== 3) {
+        return jsonError('Featured home products must contain 3 unique product ids', 400);
+    }
+
+    const placeholders = parsedProductIds.map(() => '?').join(', ');
+    const rentableRows = await env.DB.prepare(
+        `SELECT product_id, variant_id, rentable
+         FROM products
+         WHERE shop_id = ?
+           AND product_id IN (${placeholders})`
+    )
+        .bind(shopId, ...parsedProductIds)
+        .all();
+
+    const rentableSet = new Set<number>();
+    const missingVariantProductIds: number[] = [];
+    for (const row of rentableRows.results ?? []) {
+        if (!isRecord(row)) {
+            continue;
+        }
+        const productId = toNumber(row.product_id);
+        const variantId = toNumber(row.variant_id);
+        const rentable = toBooleanFlag(row.rentable);
+        if (!productId || !rentable) {
+            continue;
+        }
+        rentableSet.add(productId);
+        if (!variantId) {
+            missingVariantProductIds.push(productId);
+        }
+    }
+
+    if (rentableSet.size !== 3) {
+        return jsonError('Each featured home product must be configured as rentable first', 400);
+    }
+    if (missingVariantProductIds.length > 0) {
+        return jsonError('Each featured home product must have a configured variant id', 400);
+    }
+
+    const statements: D1PreparedStatement[] = [
+        env.DB.prepare('DELETE FROM featured_home_products WHERE shop_id = ?').bind(shopId),
+    ];
+    parsedProductIds.forEach((productId, index) => {
+        statements.push(
+            env.DB.prepare(
+                `INSERT INTO featured_home_products (shop_id, position, product_id, created_at, updated_at)
+                 VALUES (?, ?, ?, datetime('now'), datetime('now'))
+                 ON CONFLICT(shop_id, position) DO UPDATE SET
+                    product_id = excluded.product_id,
+                    updated_at = datetime('now')`
+            ).bind(shopId, index + 1, productId)
+        );
+    });
+
+    await env.DB.batch(statements);
+
+    return Response.json({
+        ok: true,
+        featured_home_products: parsedProductIds.map((productId, index) => ({
+            position: index + 1,
+            product_id: productId,
+        })),
+    });
 }
 
 async function handleInventoryGet(request: Request, env: Env, shopId: number): Promise<Response> {
@@ -1328,6 +1711,203 @@ async function fulfillShopifyOrder(env: Env, auth: AdminAuthContext, orderId: nu
     return { success: true, message: 'Fulfilled' };
 }
 
+async function syncProductTemplateSuffixForRentable(
+    env: Env,
+    auth: AdminAuthContext,
+    productId: number,
+    nextRentable: boolean,
+    currentPreviousTemplateSuffix: string | null
+): Promise<ProductTemplateSyncResult> {
+    const accessToken = await getShopAccessToken(env, auth.shopId, auth.shopDomain, auth.sessionToken);
+    if (!accessToken) {
+        return {
+            ok: false,
+            previousTemplateSuffix: currentPreviousTemplateSuffix,
+            error: 'Unable to obtain Shopify access token. Please reinstall the app.',
+        };
+    }
+
+    const snapshot = await getShopifyProductTemplateSuffix(auth.shopDomain, accessToken, productId);
+    if (!snapshot.ok) {
+        return {
+            ok: false,
+            previousTemplateSuffix: currentPreviousTemplateSuffix,
+            error: snapshot.error ?? 'Failed to read Shopify product template',
+        };
+    }
+
+    const liveTemplateSuffix = normalizeTemplateSuffix(snapshot.templateSuffix);
+    if (nextRentable) {
+        let previousTemplateSuffix = currentPreviousTemplateSuffix;
+        if (liveTemplateSuffix !== RENTALS_TEMPLATE_SUFFIX) {
+            previousTemplateSuffix = liveTemplateSuffix;
+            const updateResult = await setShopifyProductTemplateSuffix(
+                auth.shopDomain,
+                accessToken,
+                productId,
+                RENTALS_TEMPLATE_SUFFIX
+            );
+            if (!updateResult.ok) {
+                return {
+                    ok: false,
+                    previousTemplateSuffix: currentPreviousTemplateSuffix,
+                    error: updateResult.error ?? 'Failed to assign rentals template',
+                };
+            }
+        }
+
+        return { ok: true, previousTemplateSuffix };
+    }
+
+    if (liveTemplateSuffix === RENTALS_TEMPLATE_SUFFIX) {
+        const updateResult = await setShopifyProductTemplateSuffix(
+            auth.shopDomain,
+            accessToken,
+            productId,
+            currentPreviousTemplateSuffix
+        );
+        if (!updateResult.ok) {
+            return {
+                ok: false,
+                previousTemplateSuffix: currentPreviousTemplateSuffix,
+                error: updateResult.error ?? 'Failed to restore previous product template',
+            };
+        }
+    }
+
+    return { ok: true, previousTemplateSuffix: null };
+}
+
+async function getShopifyProductTemplateSuffix(
+    shopDomain: string,
+    accessToken: string,
+    productId: number
+): Promise<ShopifyProductTemplateSnapshot> {
+    const query = `
+    query ProductTemplate($id: ID!) {
+      product(id: $id) {
+        id
+        templateSuffix
+      }
+    }
+    `;
+
+    try {
+        const response = await fetch(`https://${shopDomain}/admin/api/${SHOPIFY_ADMIN_API_VERSION}/graphql.json`, {
+            method: 'POST',
+            headers: {
+                'X-Shopify-Access-Token': accessToken,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                query,
+                variables: {
+                    id: `gid://shopify/Product/${productId}`,
+                },
+            }),
+        });
+
+        if (!response.ok) {
+            return { ok: false, templateSuffix: null, error: `Shopify GraphQL HTTP ${response.status}` };
+        }
+
+        const payload = await response.json() as unknown;
+        if (!isRecord(payload)) {
+            return { ok: false, templateSuffix: null, error: 'Invalid Shopify GraphQL payload' };
+        }
+        if (Array.isArray(payload.errors) && payload.errors.length > 0) {
+            return { ok: false, templateSuffix: null, error: 'Shopify GraphQL returned errors' };
+        }
+
+        const data = payload.data;
+        if (!isRecord(data) || !isRecord(data.product)) {
+            return { ok: false, templateSuffix: null, error: 'Shopify product not found' };
+        }
+
+        const templateSuffixRaw = data.product.templateSuffix;
+        const templateSuffix = typeof templateSuffixRaw === 'string' ? templateSuffixRaw : null;
+        return { ok: true, templateSuffix: normalizeTemplateSuffix(templateSuffix) };
+    } catch (error) {
+        return {
+            ok: false,
+            templateSuffix: null,
+            error: error instanceof Error ? error.message : 'Shopify template lookup failed',
+        };
+    }
+}
+
+async function setShopifyProductTemplateSuffix(
+    shopDomain: string,
+    accessToken: string,
+    productId: number,
+    templateSuffix: string | null
+): Promise<{ ok: boolean; error?: string }> {
+    const mutation = `
+    mutation UpdateProductTemplate($input: ProductInput!) {
+      productUpdate(input: $input) {
+        product {
+          id
+          templateSuffix
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+    `;
+
+    try {
+        const response = await fetch(`https://${shopDomain}/admin/api/${SHOPIFY_ADMIN_API_VERSION}/graphql.json`, {
+            method: 'POST',
+            headers: {
+                'X-Shopify-Access-Token': accessToken,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                query: mutation,
+                variables: {
+                    input: {
+                        id: `gid://shopify/Product/${productId}`,
+                        templateSuffix,
+                    },
+                },
+            }),
+        });
+
+        if (!response.ok) {
+            const body = await response.text();
+            return { ok: false, error: `Shopify GraphQL HTTP ${response.status}: ${body}` };
+        }
+
+        const payload = await response.json() as unknown;
+        if (!isRecord(payload)) {
+            return { ok: false, error: 'Invalid Shopify GraphQL payload' };
+        }
+        if (Array.isArray(payload.errors) && payload.errors.length > 0) {
+            return { ok: false, error: 'Shopify GraphQL mutation errors' };
+        }
+
+        const data = payload.data;
+        if (!isRecord(data) || !isRecord(data.productUpdate)) {
+            return { ok: false, error: 'Unexpected Shopify mutation response' };
+        }
+
+        const userErrors = data.productUpdate.userErrors;
+        if (Array.isArray(userErrors) && userErrors.length > 0) {
+            const first = userErrors.find((item) => isRecord(item) && typeof item.message === 'string');
+            const message = first && typeof first.message === 'string'
+                ? first.message
+                : 'Shopify rejected template update';
+            return { ok: false, error: message };
+        }
+
+        return { ok: true };
+    } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : 'Shopify mutation failed' };
+    }
+}
+
 async function handleShopifyProductsGet(env: Env, auth: AdminAuthContext): Promise<Response> {
     const accessToken = await getShopAccessToken(env, auth.shopId, auth.shopDomain, auth.sessionToken);
     if (!accessToken) return jsonError('Unable to obtain Shopify access token. Please reinstall the app.', 502);
@@ -1342,6 +1922,9 @@ async function handleShopifyProductsGet(env: Env, auth: AdminAuthContext): Promi
             id
             title
             status
+            handle
+            onlineStoreUrl
+            templateSuffix
             images(first: 1) {
               edges {
                 node {
@@ -1397,6 +1980,15 @@ async function handleShopifyProductsGet(env: Env, auth: AdminAuthContext): Promi
                 id: productId,
                 title: node.title,
                 status: node.status,
+                product_url:
+                    typeof node.onlineStoreUrl === 'string' && node.onlineStoreUrl.trim().length > 0
+                        ? node.onlineStoreUrl
+                        : typeof node.handle === 'string' && node.handle.trim().length > 0
+                            ? `https://${auth.shopDomain}/products/${node.handle}`
+                            : null,
+                template_suffix: typeof node.templateSuffix === 'string' && node.templateSuffix.trim().length > 0
+                    ? node.templateSuffix
+                    : null,
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 images: node.images.edges.map((imgEdge: any) => ({
                     src: imgEdge.node.url
@@ -1882,6 +2474,22 @@ function toNumber(value: unknown): number | null {
     return null;
 }
 
+function toBooleanFlag(value: unknown): boolean {
+    if (typeof value === 'boolean') {
+        return value;
+    }
+    const numeric = toNumber(value);
+    return numeric !== null && numeric !== 0;
+}
+
+function normalizeTemplateSuffix(value: unknown): string | null {
+    if (typeof value !== 'string') {
+        return null;
+    }
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+}
+
 function getOptionalPositiveInt(record: Record<string, unknown>, key: string): number | undefined {
     if (!(key in record)) {
         return undefined;
@@ -2266,6 +2874,14 @@ export async function __testHandleBookingCancel(
     bookingToken: string
 ): Promise<Response> {
     return handleBookingCancel(env, buildTestAdminAuthContext(auth), bookingToken);
+}
+
+export async function __testHandleProductsTemplateSync(
+    request: Request,
+    env: Env,
+    auth: TestAdminAuthInput
+): Promise<Response> {
+    return handleProductsTemplateSync(request, env, buildTestAdminAuthContext(auth));
 }
 
 export function __resetAdminSchemaCache(): void {

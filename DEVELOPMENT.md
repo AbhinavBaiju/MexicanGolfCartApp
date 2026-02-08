@@ -31,6 +31,10 @@ This starts:
   - UI edits in `apps/admin/src` hot reload inside the embedded iframe.
   - If tunnel DNS fails, check `cloudflared --version` and temporarily rename `~/.cloudflared/config.yml` / `config.yaml` if present.
 - Storefront widget requests go through Shopify App Proxy (`/apps/rental`) so they follow the dev Worker endpoint from `shopify.app.dev.toml`.
+- Inventory configuration flow:
+  - Configure `Rentable Products` in the Inventory page first; enabling rentable automatically applies Shopify product template `product.rentals`.
+  - Configure `Featured Home Products` with exactly 3 rentable products; these drive the home-page booking widget product toggle.
+  - If a rentable product is disabled, the Worker restores the product template suffix to its previous/default value.
 - If you change `worker/wrangler.toml`, restart `npm run dev` to pick up config changes.
 - The Worker deploy watcher uses `WRANGLER` auth from your local machine. Ensure you are logged in:
 

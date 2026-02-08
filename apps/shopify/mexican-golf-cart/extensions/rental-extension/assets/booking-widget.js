@@ -45,6 +45,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let runtimeLocations = [];
         let runtimeProducts = [];
+        let runtimeFeaturedProducts = [];
         let selectedProduct = null;
         let debounceTimer = null;
         let countdownInterval = null;
@@ -83,12 +84,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     throw new Error(`Config fetch failed (${response.status})`);
                 }
                 const data = await response.json();
-                if (!data?.ok || !Array.isArray(data.locations) || !Array.isArray(data.products)) {
+                if (!data?.ok || !Array.isArray(data.locations)) {
                     throw new Error('Invalid config response');
                 }
 
+                const rentablePayload = Array.isArray(data.rentable_products)
+                    ? data.rentable_products
+                    : Array.isArray(data.products)
+                        ? data.products
+                        : [];
+                const featuredIds = normalizeFeaturedProductIds(data.featured_products);
+
                 runtimeLocations = normalizeLocations(data.locations);
-                runtimeProducts = normalizeProducts(data.products);
+                runtimeProducts = normalizeProducts(rentablePayload);
+                runtimeFeaturedProducts = resolveFeaturedProducts(runtimeProducts, featuredIds);
 
                 if (runtimeLocations.length === 0) {
                     throw new Error('No active locations configured');
@@ -98,7 +107,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
 
                 renderLocations(runtimeLocations);
-                renderProducts(runtimeProducts);
+                renderProducts(runtimeFeaturedProducts);
                 updateStatus('');
                 updateSubmitForConfigState();
                 debouncedCheckAvailability();
@@ -154,6 +163,44 @@ document.addEventListener('DOMContentLoaded', () => {
                 .filter((entry) => entry !== null);
         }
 
+        function normalizeFeaturedProductIds(featuredProducts) {
+            if (!Array.isArray(featuredProducts)) {
+                return [];
+            }
+
+            const seen = new Set();
+            const ids = [];
+            featuredProducts.forEach((entry) => {
+                const productId = parsePositiveInt(entry?.product_id);
+                if (!productId || seen.has(productId)) {
+                    return;
+                }
+                seen.add(productId);
+                ids.push(productId);
+            });
+
+            return ids.slice(0, 3);
+        }
+
+        function resolveFeaturedProducts(rentableProducts, featuredIds) {
+            if (!Array.isArray(rentableProducts) || rentableProducts.length === 0) {
+                return [];
+            }
+
+            const rentableById = new Map(
+                rentableProducts.map((entry) => [entry.product_id, entry])
+            );
+
+            const configured = featuredIds
+                .map((productId) => rentableById.get(productId))
+                .filter((entry) => entry);
+            if (configured.length > 0) {
+                return configured.slice(0, 3);
+            }
+
+            return rentableProducts.slice(0, 3);
+        }
+
         function renderLocations(locations) {
             elements.location.innerHTML = '<option value="" disabled selected>Select a location</option>';
             locations.forEach((location) => {
@@ -192,8 +239,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
             }
 
-            const desiredProduct = (initialProductId && products.find((p) => p.product_id === initialProductId))
-                || products[0];
+            const desiredProduct = isProductPage
+                ? (initialProductId && runtimeProducts.find((p) => p.product_id === initialProductId))
+                : ((initialProductId && products.find((p) => p.product_id === initialProductId)) || products[0]);
             if (!desiredProduct) {
                 updateStatus('No rentable products are configured.', 'error');
                 updateSubmitForConfigState();
@@ -348,7 +396,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (!productId) {
                         return;
                     }
-                    const next = runtimeProducts.find((product) => product.product_id === productId);
+                    const next = runtimeFeaturedProducts.find((product) => product.product_id === productId);
                     if (next) {
                         selectProduct(next);
                     }

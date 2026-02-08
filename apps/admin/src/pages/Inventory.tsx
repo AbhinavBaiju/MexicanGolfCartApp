@@ -15,6 +15,18 @@ interface ProductConfig {
     updated_at: string;
 }
 
+interface ShopifyProductSummary {
+    id: number;
+    title: string;
+}
+
+interface ShopifyProductsResponse {
+    products?: Array<{
+        id: string | number;
+        title?: string;
+    }>;
+}
+
 // Combined View Model
 interface ProductDefinition {
     id: number; // Shopify Product ID
@@ -38,6 +50,7 @@ export default function Inventory() {
 
     // Data States
     const [productConfigs, setProductConfigs] = useState<ProductConfig[]>([]);
+    const [shopifyProducts, setShopifyProducts] = useState<ShopifyProductSummary[]>([]);
     const [inventory, setInventory] = useState<InventoryDay[]>([]);
     const [loading, setLoading] = useState(false);
 
@@ -91,14 +104,28 @@ export default function Inventory() {
     // 1. Fetch Configs on Mount
     useEffect(() => {
         const loadInitial = async () => {
-            // Load Configs
-            const configRes = await fetch('/products');
+            const [configRes, shopifyProductsRes] = await Promise.all([
+                fetch('/products'),
+                fetch('/shopify-products'),
+            ]);
             if (configRes.ok) {
                 const data = await configRes.json();
                 setProductConfigs(data.products || []);
             }
+            if (shopifyProductsRes.ok) {
+                const data = (await shopifyProductsRes.json()) as ShopifyProductsResponse;
+                const products = Array.isArray(data.products)
+                    ? data.products
+                        .map((product: { id: string | number; title?: string }) => ({
+                            id: Number(product.id),
+                            title: String(product.title || '').trim(),
+                        }))
+                        .filter((product: ShopifyProductSummary) => Number.isInteger(product.id) && product.id > 0 && product.title.length > 0)
+                    : [];
+                setShopifyProducts(products);
+            }
         };
-        loadInitial();
+        void loadInitial();
     }, [fetch]);
 
     // 2. Computed Product Definitions (Merged)
@@ -123,9 +150,10 @@ export default function Inventory() {
         }
 
         return productConfigs.map(cfg => {
+            const matchedShopifyProduct = shopifyProducts.find((product) => product.id === cfg.product_id);
             return {
                 id: cfg.product_id,
-                title: `Product ${cfg.product_id}`,
+                title: matchedShopifyProduct?.title || `Product ${cfg.product_id}`,
                 image: '',
                 price: '$-/day', // Helper to fetch variant price if needed
                 features: 'Standard features',
@@ -134,7 +162,7 @@ export default function Inventory() {
                 isLinked: true
             };
         });
-    }, [productConfigs]);
+    }, [productConfigs, shopifyProducts]);
 
     // 3. Load Inventory for Month based on productDefinitions
     const loadInventory = useCallback(async () => {
@@ -373,28 +401,26 @@ export default function Inventory() {
                         For now, the slots logic above handles it if we start empty.
                         But if we have configs, we show them. 
                         We might want a "Plus" Card to add more.*/}
-                    {productConfigs.length < 3 && (
-                        <Grid.Cell columnSpan={{ xs: 6, sm: 6, md: 4, lg: 4, xl: 4 }}>
-                            <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '300px' }}>
-                                <Button onClick={() => {
-                                    setEditingProductDiff({
-                                        id: 0,
-                                        title: 'New Product',
-                                        image: '',
-                                        price: '',
-                                        features: '',
-                                        totalAvailability: 0,
-                                        shopifyProductId: '',
-                                        isLinked: false
-                                    });
-                                    setTempProdAvailability('10');
-                                    setTempShopifyId('');
-                                    setTempVariantId('');
-                                    setProductSettingsModalOpen(true);
-                                }}>Add Product Configuration</Button>
-                            </div>
-                        </Grid.Cell>
-                    )}
+                    <Grid.Cell columnSpan={{ xs: 6, sm: 6, md: 4, lg: 4, xl: 4 }}>
+                        <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '300px' }}>
+                            <Button onClick={() => {
+                                setEditingProductDiff({
+                                    id: 0,
+                                    title: 'New Product',
+                                    image: '',
+                                    price: '',
+                                    features: '',
+                                    totalAvailability: 0,
+                                    shopifyProductId: '',
+                                    isLinked: false
+                                });
+                                setTempProdAvailability('10');
+                                setTempShopifyId('');
+                                setTempVariantId('');
+                                setProductSettingsModalOpen(true);
+                            }}>Add Product Configuration</Button>
+                        </div>
+                    </Grid.Cell>
                 </Grid>
 
                 <Layout>

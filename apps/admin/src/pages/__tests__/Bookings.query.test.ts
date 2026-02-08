@@ -20,6 +20,8 @@ describe('Bookings query params', () => {
             selectedType: 'Delivery',
             sortDirection: 'asc',
             search: '  alice@example.com  ',
+            limit: 25,
+            offset: 50,
         });
 
         expect(params.get('status')).toBe('HOLD');
@@ -28,6 +30,8 @@ describe('Bookings query params', () => {
         expect(params.get('fulfillment_type')).toBe('Delivery');
         expect(params.get('sort_direction')).toBe('asc');
         expect(params.get('search')).toBe('alice@example.com');
+        expect(params.get('limit')).toBe('25');
+        expect(params.get('offset')).toBe('50');
     });
 
     it('keeps calendar view query minimal to prevent list-only filters leaking', () => {

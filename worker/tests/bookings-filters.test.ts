@@ -62,7 +62,7 @@ test('GET /admin/bookings rejects invalid status filter values', async () => {
     assert.equal(body.error, 'Invalid status filter');
 });
 
-test('GET /admin/bookings accepts WAITLIST filter and binds it in SQL query', async () => {
+test('GET /admin/bookings rejects WAITLIST filter', async () => {
     __resetAdminSchemaCache();
     const controller = createController();
     const env = createEnv(controller.db);
@@ -74,13 +74,10 @@ test('GET /admin/bookings accepts WAITLIST filter and binds it in SQL query', as
         shopTimezone: 'America/Mazatlan',
     });
 
-    assert.equal(response.status, 200);
-
-    const queryCall = controller.calls.find(
-        (call) => call.method === 'all' && call.sql.includes('FROM bookings b')
-    );
-    assert.ok(queryCall, 'Expected bookings query to be executed');
-    assert.ok(queryCall.bindings.includes('WAITLIST'), 'WAITLIST should be included in SQL bindings');
+    assert.equal(response.status, 400);
+    const body = (await response.json()) as { ok: boolean; error?: string };
+    assert.equal(body.ok, false);
+    assert.equal(body.error, 'Invalid status filter');
 });
 
 test('GET /admin/bookings date_preset=upcoming uses shop-specific timezone date', async () => {
@@ -110,4 +107,28 @@ test('GET /admin/bookings date_preset=upcoming uses shop-specific timezone date'
         `Expected date_preset binding to include ${expectedToday}`
     );
     assert.match(queryCall.sql, /ORDER BY b\.start_date ASC/);
+});
+
+test('GET /admin/bookings applies limit and offset pagination', async () => {
+    __resetAdminSchemaCache();
+    const controller = createController();
+    const env = createEnv(controller.db);
+    const request = new Request(
+        'https://worker.example/admin/bookings?sort_direction=desc&limit=40&offset=80'
+    );
+
+    const response = await __testHandleBookingsGet(request, env, {
+        shopId: 15,
+        shopDomain: 'demo.myshopify.com',
+        shopTimezone: 'America/Mazatlan',
+    });
+
+    assert.equal(response.status, 200);
+
+    const queryCall = controller.calls.find(
+        (call) => call.method === 'all' && call.sql.includes('FROM bookings b')
+    );
+    assert.ok(queryCall, 'Expected bookings query to be executed');
+    assert.equal(queryCall.bindings[queryCall.bindings.length - 2], 40);
+    assert.equal(queryCall.bindings[queryCall.bindings.length - 1], 80);
 });

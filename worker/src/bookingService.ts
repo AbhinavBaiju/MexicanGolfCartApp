@@ -4,6 +4,15 @@ import { DEFAULT_STORE_TIMEZONE, normalizeStoreTimezone, SHOPIFY_ADMIN_API_VERSI
 
 export type ReleaseTargetStatus = 'RELEASED' | 'EXPIRED';
 
+/**
+ * Booking status transitions (enforced via guarded SQL updates):
+ * HOLD -> CONFIRMED | EXPIRED | RELEASED | INVALID | CANCELLED
+ * CONFIRMED -> RELEASED | CANCELLED
+ * RELEASED -> (terminal)
+ * EXPIRED -> (terminal)
+ * INVALID -> (terminal)
+ * CANCELLED -> (terminal)
+ */
 type BookingStatus = 'HOLD' | 'CONFIRMED' | 'RELEASED' | 'EXPIRED' | 'INVALID' | 'CANCELLED';
 
 interface BookingDayRow {
@@ -104,6 +113,12 @@ interface OrderCancellationResult {
 interface LocationRules {
     leadTimeDays: number;
     minDurationDays: number;
+}
+
+export interface CancelBookingResult {
+    ok: boolean;
+    previousStatus?: BookingStatus;
+    error?: 'NOT_FOUND' | 'NOT_CANCELLABLE';
 }
 
 export async function confirmBookingsFromOrder(
@@ -260,6 +275,58 @@ export async function releaseBooking(
     }
 
     await db.batch(statements);
+}
+
+export async function cancelBooking(
+    db: D1Database,
+    bookingId: string
+): Promise<CancelBookingResult> {
+    const booking = (await db
+        .prepare('SELECT shop_id, status FROM bookings WHERE id = ?')
+        .bind(bookingId)
+        .first()) as BookingRow | null;
+
+    if (!booking) {
+        return { ok: false, error: 'NOT_FOUND' };
+    }
+
+    if (booking.status === 'CANCELLED') {
+        return { ok: true, previousStatus: booking.status };
+    }
+
+    if (booking.status !== 'HOLD' && booking.status !== 'CONFIRMED') {
+        return { ok: false, error: 'NOT_CANCELLABLE', previousStatus: booking.status };
+    }
+
+    const bookingDays = await db
+        .prepare('SELECT product_id, date, qty FROM booking_days WHERE booking_id = ?')
+        .bind(bookingId)
+        .all();
+
+    const statements: D1PreparedStatement[] = [];
+    statements.push(
+        db.prepare(
+            `UPDATE bookings
+             SET status = 'CANCELLED', updated_at = datetime('now')
+             WHERE id = ? AND status IN ('HOLD', 'CONFIRMED')`
+        ).bind(bookingId)
+    );
+    statements.push(db.prepare('SELECT CASE WHEN changes() = 1 THEN 1 ELSE 1/0 END;'));
+
+    for (const row of bookingDays.results ?? []) {
+        const bookingDay = row as unknown as BookingDayRow;
+        statements.push(
+            db.prepare(
+                `UPDATE inventory_day
+                 SET reserved_qty = reserved_qty - ?
+                 WHERE shop_id = ? AND product_id = ? AND date = ? AND reserved_qty >= ?`
+            ).bind(bookingDay.qty, booking.shop_id, bookingDay.product_id, bookingDay.date, bookingDay.qty)
+        );
+        statements.push(db.prepare('SELECT CASE WHEN changes() = 1 THEN 1 ELSE 1/0 END;'));
+    }
+
+    await db.batch(statements);
+    return { ok: true, previousStatus: booking.status };
 }
 
 async function processBookingToken(
@@ -431,7 +498,7 @@ async function markBookingInvalid(db: D1Database, bookingId: string, reason: str
             .prepare(
                 `UPDATE bookings
                  SET status = 'INVALID', invalid_reason = ?, updated_at = datetime('now')
-                 WHERE id = ?`
+                 WHERE id = ? AND status = 'HOLD'`
             )
             .bind(reason, bookingId)
             .run();
@@ -442,7 +509,7 @@ async function markBookingInvalid(db: D1Database, bookingId: string, reason: str
                 .prepare(
                     `UPDATE bookings
                      SET status = 'INVALID', updated_at = datetime('now')
-                     WHERE id = ?`
+                     WHERE id = ? AND status = 'HOLD'`
                 )
                 .bind(bookingId)
                 .run();

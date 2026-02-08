@@ -53,7 +53,7 @@ async function handleAppUninstalled(shopDomain: string, env: Env) {
     }
 }
 
-async function verifyWebhookHmac(body: string, hmac: string, secret: string): Promise<boolean> {
+export async function verifyWebhookHmac(body: string, hmac: string, secret: string): Promise<boolean> {
     const encoder = new TextEncoder();
     const keyData = encoder.encode(secret);
     const data = encoder.encode(body);

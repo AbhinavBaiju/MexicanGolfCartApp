@@ -23,6 +23,7 @@ export interface Booking {
     service_count?: number | string | null;
     service_product_ids?: string | null;
     has_upsell?: number | boolean | null;
+    total_qty?: number | string | null;
 }
 
 interface AgreementData {
@@ -81,12 +82,15 @@ interface BookingDetailResponse {
 interface BookingCardProps {
     booking: Booking;
     onMarkComplete?: (token: string) => Promise<boolean>;
+    onCancel?: (token: string) => Promise<boolean>;
 }
 
-export function BookingCard({ booking, onMarkComplete }: BookingCardProps) {
+export function BookingCard({ booking, onMarkComplete, onCancel }: BookingCardProps) {
     const fetch = useAuthenticatedFetch();
     const [modalOpen, setModalOpen] = useState(false);
     const [completing, setCompleting] = useState(false);
+    const [cancelModalOpen, setCancelModalOpen] = useState(false);
+    const [cancelling, setCancelling] = useState(false);
 
     const [agreementModalOpen, setAgreementModalOpen] = useState(false);
     const [agreementLoading, setAgreementLoading] = useState(false);
@@ -119,6 +123,22 @@ export function BookingCard({ booking, onMarkComplete }: BookingCardProps) {
             console.error('Failed to complete booking', e);
         } finally {
             setCompleting(false);
+        }
+    };
+
+    const canCancel = booking.status === 'HOLD' || booking.status === 'CONFIRMED';
+    const handleConfirmCancel = async () => {
+        if (!onCancel) return;
+        setCancelling(true);
+        try {
+            const cancelled = await onCancel(booking.booking_token);
+            if (cancelled) {
+                setCancelModalOpen(false);
+            }
+        } catch (e: unknown) {
+            console.error('Failed to cancel booking', e);
+        } finally {
+            setCancelling(false);
         }
     };
 
@@ -247,9 +267,17 @@ export function BookingCard({ booking, onMarkComplete }: BookingCardProps) {
                                 variant="primary"
                                 tone="critical"
                                 onClick={() => setModalOpen(true)}
-                                disabled={booking.status === 'RELEASED'}
+                                disabled={booking.status !== 'HOLD' && booking.status !== 'CONFIRMED'}
                             >
                                 Mark as Completed
+                            </Button>
+                            <Button
+                                variant="secondary"
+                                tone="critical"
+                                onClick={() => setCancelModalOpen(true)}
+                                disabled={!canCancel}
+                            >
+                                Cancel Booking
                             </Button>
                         </InlineStack>
 
@@ -259,7 +287,7 @@ export function BookingCard({ booking, onMarkComplete }: BookingCardProps) {
                             </Text>
                         </div>
                         <Text as="p" tone="subdued" alignment="end">
-                            Quantity: 1
+                            Quantity: {Number(booking.total_qty ?? 0) || 0}
                         </Text>
                     </BlockStack>
                 </InlineStack>
@@ -285,6 +313,30 @@ export function BookingCard({ booking, onMarkComplete }: BookingCardProps) {
                 <Modal.Section>
                     <Text as="p">
                         Are you sure you want to mark this booking as completed? This will update the status to Fulfilled.
+                    </Text>
+                </Modal.Section>
+            </Modal>
+
+            <Modal
+                open={cancelModalOpen}
+                onClose={() => setCancelModalOpen(false)}
+                title="Cancel booking?"
+                primaryAction={{
+                    content: 'Yes, cancel booking',
+                    onAction: handleConfirmCancel,
+                    loading: cancelling,
+                    destructive: true,
+                }}
+                secondaryActions={[
+                    {
+                        content: 'No, keep booking',
+                        onAction: () => setCancelModalOpen(false),
+                    },
+                ]}
+            >
+                <Modal.Section>
+                    <Text as="p">
+                        Cancelling this booking will release reserved inventory and set the booking status to CANCELLED.
                     </Text>
                 </Modal.Section>
             </Modal>

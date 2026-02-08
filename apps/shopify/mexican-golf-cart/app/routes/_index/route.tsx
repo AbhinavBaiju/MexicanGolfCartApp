@@ -22,9 +22,9 @@ export default function App() {
   return (
     <div className={styles.index}>
       <div className={styles.content}>
-        <h1 className={styles.heading}>A short heading about [your app]</h1>
+        <h1 className={styles.heading}>Mexican Golf Carts Booking Admin</h1>
         <p className={styles.text}>
-          A tagline about [your app] that describes your value proposition.
+          Manage rentals, agreements, and inventory from a single embedded admin app.
         </p>
         {showForm && (
           <Form className={styles.form} method="post" action="/auth/login">
@@ -40,16 +40,13 @@ export default function App() {
         )}
         <ul className={styles.list}>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Bookings dashboard</strong>. Monitor holds, confirmations, and completion status.
           </li>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Inventory controls</strong>. Set per-day capacity and prevent overselling.
           </li>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Agreement tracking</strong>. Review customer signatures linked to orders.
           </li>
         </ul>
       </div>

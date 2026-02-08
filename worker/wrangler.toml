@@ -38,4 +38,4 @@ ADMIN_ALLOWED_ORIGINS = "https://master.mexican-golf-cart-admin.pages.dev"
 [[env.staging.d1_databases]]
 binding = "DB"
 database_name = "mexican-golf-cart-db-staging"
-database_id = "61380274-7091-41f0-b6b1-eb0a587a7687"
+database_id = "73603dc3-c26d-4b7a-951a-71afce999e4a"

@@ -34,6 +34,8 @@ const jwksCache: { keys: Map<string, JsonWebKey>; fetchedAt: number } = {
 
 const JWKS_CACHE_TTL_MS = 60 * 60 * 1000;
 const DEFAULT_JWKS_URL = 'https://shopify.dev/.well-known/jwks.json';
+const OAUTH_STATE_COOKIE_NAME = 'mgc_oauth_state';
+const OAUTH_STATE_TTL_SECONDS = 300;
 
 export async function handleAuth(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -53,7 +55,13 @@ export async function handleAuth(request: Request, env: Env): Promise<Response> 
 
     const authUrl = `https://${shop}/admin/oauth/authorize?client_id=${env.SHOPIFY_API_KEY}&scope=${scopes}&redirect_uri=${redirectUri}&state=${nonce}&grant_options[]=${accessMode}`;
 
-    return Response.redirect(authUrl);
+    return new Response(null, {
+        status: 302,
+        headers: {
+            Location: authUrl,
+            'Set-Cookie': buildOauthStateCookie(nonce),
+        },
+    });
 }
 
 export async function verifySessionToken(
@@ -160,22 +168,27 @@ export async function handleAuthCallback(request: Request, env: Env): Promise<Re
     const shop = url.searchParams.get('shop');
     const code = url.searchParams.get('code');
     const hmac = url.searchParams.get('hmac');
-    // const state = url.searchParams.get('state'); // In a real app, verify this matches the nonce set in cookie
+    const state = url.searchParams.get('state');
+    const oauthStateCookie = readCookie(request.headers.get('Cookie'), OAUTH_STATE_COOKIE_NAME);
 
-    if (!shop || !code || !hmac) {
-        return new Response('Missing required parameters', { status: 400 });
+    if (!shop || !code || !hmac || !state) {
+        return withClearedOauthStateCookie(new Response('Missing required parameters', { status: 400 }));
+    }
+
+    if (!oauthStateCookie || oauthStateCookie !== state) {
+        return withClearedOauthStateCookie(new Response('Invalid OAuth state', { status: 400 }));
     }
 
     // 1. Verify HMAC
     const valid = await verifyHmac(url.searchParams, env.SHOPIFY_API_SECRET);
     if (!valid) {
-        return new Response('HMAC validation failed', { status: 400 });
+        return withClearedOauthStateCookie(new Response('HMAC validation failed', { status: 400 }));
     }
 
     // 2. Exchange access token
     const accessToken = await exchangeAccessToken(shop, code, env);
     if (!accessToken) {
-        return new Response('Failed to exchange access token', { status: 500 });
+        return withClearedOauthStateCookie(new Response('Failed to exchange access token', { status: 500 }));
     }
 
     const shopTimezone = await fetchShopTimezone(shop, accessToken);
@@ -195,7 +208,7 @@ export async function handleAuthCallback(request: Request, env: Env): Promise<Re
             .run();
     } catch (e) {
         console.error('Database error:', e);
-        return new Response('Failed to store shop data', { status: 500 });
+        return withClearedOauthStateCookie(new Response('Failed to store shop data', { status: 500 }));
     }
 
     // 4. Register Webhook
@@ -210,10 +223,12 @@ export async function handleAuthCallback(request: Request, env: Env): Promise<Re
         // Decode host to base64 for the URL if needed, but usually it's passed through
         // Actually, we usually redirect to the app's UI served by Shopify or our own UI
         // If this is a pure backend app, maybe just say "Installed!"
-        return new Response(`App installed successfully for ${shop}! You can close this window.`);
+        return withClearedOauthStateCookie(
+            new Response(`App installed successfully for ${shop}! You can close this window.`)
+        );
     }
 
-    return new Response(`App installed successfully for ${shop}!`);
+    return withClearedOauthStateCookie(new Response(`App installed successfully for ${shop}!`));
 }
 
 
@@ -247,6 +262,47 @@ async function exchangeAccessToken(shop: string, code: string, env: Env): Promis
         console.error('Token exchange error', e);
         return null;
     }
+}
+
+function buildOauthStateCookie(state: string): string {
+    return [
+        `${OAUTH_STATE_COOKIE_NAME}=${encodeURIComponent(state)}`,
+        `Max-Age=${OAUTH_STATE_TTL_SECONDS}`,
+        'Path=/auth/callback',
+        'HttpOnly',
+        'Secure',
+        'SameSite=Lax',
+    ].join('; ');
+}
+
+function clearOauthStateCookie(): string {
+    return [
+        `${OAUTH_STATE_COOKIE_NAME}=`,
+        'Max-Age=0',
+        'Path=/auth/callback',
+        'HttpOnly',
+        'Secure',
+        'SameSite=Lax',
+    ].join('; ');
+}
+
+function withClearedOauthStateCookie(response: Response): Response {
+    response.headers.append('Set-Cookie', clearOauthStateCookie());
+    return response;
+}
+
+function readCookie(cookieHeader: string | null, key: string): string | null {
+    if (!cookieHeader) {
+        return null;
+    }
+    const chunks = cookieHeader.split(';');
+    for (const chunk of chunks) {
+        const [rawKey, ...rawValue] = chunk.trim().split('=');
+        if (rawKey === key) {
+            return decodeURIComponent(rawValue.join('='));
+        }
+    }
+    return null;
 }
 
 async function registerWebhook(shop: string, accessToken: string, env: Env) {

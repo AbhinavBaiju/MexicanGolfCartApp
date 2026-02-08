@@ -105,6 +105,11 @@ interface BookingCompleteResponse {
     };
 }
 
+interface BookingCancelResponse {
+    ok?: boolean;
+    error?: string;
+}
+
 interface FilterOption {
     label: string;
     value: string;
@@ -248,7 +253,7 @@ export default function Dashboard() {
         try {
             const [dashboardRes, bookingsRes, productsRes, locationsRes, shopifyProductsRes] = await Promise.all([
                 fetch('/dashboard'),
-                fetch('/bookings'),
+                fetch('/bookings?limit=500&offset=0'),
                 fetch('/products'),
                 fetch('/locations'),
                 fetch('/shopify-products'),
@@ -345,6 +350,8 @@ export default function Dashboard() {
                 selectedUpsell,
                 search,
             });
+            params.set('limit', '100');
+            params.set('offset', '0');
 
             const response = await fetch(`/bookings?${params.toString()}`);
             if (!response.ok) {
@@ -412,6 +419,50 @@ export default function Dashboard() {
             return false;
         }
     };
+
+    const handleCancelBooking = async (token: string): Promise<boolean> => {
+        try {
+            const response = await fetch(`/bookings/${token}/cancel`, { method: 'POST' });
+            const responseBody = (await response.json().catch(() => null)) as BookingCancelResponse | null;
+            if (!response.ok || !responseBody?.ok) {
+                const message = responseBody?.error || `Failed to cancel booking (${response.status})`;
+                showShopifyToast(message, true);
+                return false;
+            }
+
+            await Promise.all([loadData(), loadFilteredBookings(debouncedSearch)]);
+            showShopifyToast('Booking cancelled.');
+            return true;
+        } catch (cancelError) {
+            const message = cancelError instanceof Error ? cancelError.message : 'Failed to cancel booking';
+            showShopifyToast(message, true);
+            return false;
+        }
+    };
+
+    const handleViewAllFilteredBookings = useCallback(() => {
+        const params = buildDashboardBookingsQueryParams({
+            sortDirection,
+            upcomingOnly,
+            selectedService,
+            selectedLocation,
+            selectedType,
+            selectedStatus,
+            selectedUpsell,
+            search: debouncedSearch,
+        });
+        navigate(`/bookings?${params.toString()}`);
+    }, [
+        debouncedSearch,
+        navigate,
+        selectedLocation,
+        selectedService,
+        selectedStatus,
+        selectedType,
+        selectedUpsell,
+        sortDirection,
+        upcomingOnly,
+    ]);
 
     const handleExport = () => {
         if (filteredBookings.length === 0) {
@@ -584,12 +635,15 @@ export default function Dashboard() {
                                                     key={booking.booking_token}
                                                     booking={booking}
                                                     onMarkComplete={handleMarkComplete}
+                                                    onCancel={handleCancelBooking}
                                                 />
                                             ))}
                                             {filteredBookings.length > 5 && (
                                                 <Box padding="400">
                                                     <InlineStack align="center">
-                                                        <Button variant="plain">View all filtered bookings</Button>
+                                                        <Button variant="plain" onClick={handleViewAllFilteredBookings}>
+                                                            View all filtered bookings
+                                                        </Button>
                                                     </InlineStack>
                                                 </Box>
                                             )}

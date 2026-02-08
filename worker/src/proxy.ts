@@ -47,7 +47,21 @@ interface NormalizedHoldItem {
     default_capacity: number;
 }
 
+interface ConfigProductRow {
+    product_id: number;
+    variant_id: number | null;
+    default_capacity: number;
+    deposit_variant_id: number | null;
+    deposit_multiplier: number | null;
+    title?: string;
+    image_url?: string;
+    image_alt?: string | null;
+}
+
 const HOLD_MINUTES = 20;
+const MAX_HOLD_RANGE_DAYS = 90;
+const MAX_HOLD_TOTAL_QTY = 10;
+const MAX_HOLD_LINE_ITEMS = 10;
 
 export async function handleProxyRequest(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -280,6 +294,11 @@ async function handleHold(request: Request, env: Env, shopDomain: string): Promi
         return Response.json({ ok: false, error: 'Invalid hold request' }, { status: 400 });
     }
 
+    const holdLimitsError = validateHoldRequestLimits(parsed);
+    if (holdLimitsError) {
+        return Response.json({ ok: false, error: holdLimitsError }, { status: 400 });
+    }
+
     try {
         const shopStmt = await env.DB.prepare('SELECT id, timezone FROM shops WHERE shop_domain = ?')
             .bind(shopDomain)
@@ -319,6 +338,12 @@ async function handleHold(request: Request, env: Env, shopDomain: string): Promi
         const leadTimeDays = location.lead_time_days as number;
         const minDurationDays = location.min_duration_days as number;
         const durationDays = endIndex - startIndex + 1;
+        if (durationDays > MAX_HOLD_RANGE_DAYS) {
+            return Response.json(
+                { ok: false, error: `Booking range exceeds ${MAX_HOLD_RANGE_DAYS} days` },
+                { status: 400 }
+            );
+        }
 
         if (startIndex < todayIndex + leadTimeDays) {
             return Response.json({ ok: false, error: 'Start date violates lead time' }, { status: 400 });
@@ -481,11 +506,20 @@ async function handleConfig(env: Env, shopDomain: string): Promise<Response> {
             .bind(shopId)
             .all();
 
-        const products = productsRows.results ?? [];
+        const products: ConfigProductRow[] = (productsRows.results ?? [])
+            .filter(isRecord)
+            .map((row) => ({
+                product_id: toNumber(row.product_id) ?? 0,
+                variant_id: toNumber(row.variant_id),
+                default_capacity: toNumber(row.default_capacity) ?? 0,
+                deposit_variant_id: toNumber(row.deposit_variant_id),
+                deposit_multiplier: toNumber(row.deposit_multiplier),
+            }))
+            .filter((row) => Number.isInteger(row.product_id) && row.product_id > 0);
 
         // Fetch product details from Shopify if we have products
         if (products.length > 0) {
-            const productIds = products.map((p: any) => `gid://shopify/Product/${p.product_id}`);
+            const productIds = products.map((p) => `gid://shopify/Product/${p.product_id}`);
             const query = `
             query ($ids: [ID!]!) {
               nodes(ids: $ids) {
@@ -564,7 +598,7 @@ async function handleConfig(env: Env, shopDomain: string): Promise<Response> {
                     });
 
                     // Merge titles/images into products
-                    products.forEach((p: any) => {
+                    products.forEach((p) => {
                         p.title = titleMap.get(p.product_id) || p.title || `Product ${p.product_id}`;
                         const img = imageMap.get(p.product_id);
                         if (img) {
@@ -828,6 +862,27 @@ function parseHoldBody(body: Record<string, unknown>): HoldRequestBody | null {
         location,
         items: parsedItems,
     };
+}
+
+function validateHoldRequestLimits(body: HoldRequestBody): string | null {
+    if (body.items.length > MAX_HOLD_LINE_ITEMS) {
+        return `Too many line items (max ${MAX_HOLD_LINE_ITEMS})`;
+    }
+
+    const totalQty = body.items.reduce((sum, item) => sum + item.qty, 0);
+    if (totalQty > MAX_HOLD_TOTAL_QTY) {
+        return `Total quantity exceeds ${MAX_HOLD_TOTAL_QTY}`;
+    }
+
+    const dateList = listDateStrings(body.start_date, body.end_date);
+    if (!dateList) {
+        return 'Invalid date range';
+    }
+    if (dateList.length > MAX_HOLD_RANGE_DAYS) {
+        return `Booking range exceeds ${MAX_HOLD_RANGE_DAYS} days`;
+    }
+
+    return null;
 }
 
 function rateLimitKey(request: Request, scope: string): string {

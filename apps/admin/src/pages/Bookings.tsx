@@ -17,7 +17,8 @@ import {
     TextField,
 } from '@shopify/polaris';
 import { useAuthenticatedFetch } from '../api';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import { BookingCard, type Booking } from '../components/BookingCard';
 import { BookingsCalendar } from '../components/BookingsCalendar';
 import { SearchIcon, ExportIcon, ArrowUpIcon, PlusIcon } from '@shopify/polaris-icons';
@@ -37,6 +38,12 @@ interface FilterPopoverProps {
 
 interface BookingsResponse {
     bookings?: Booking[];
+    pagination?: {
+        total?: number;
+        limit?: number;
+        offset?: number;
+        has_more?: boolean;
+    };
 }
 
 interface ProductConfigResponse {
@@ -79,6 +86,11 @@ interface BookingCompleteResponse {
         success?: boolean;
         message?: string;
     };
+}
+
+interface BookingCancelResponse {
+    ok?: boolean;
+    error?: string;
 }
 
 interface ManualProductCatalog {
@@ -236,6 +248,8 @@ function getVariantChoicesForProduct(
 
 export default function Bookings() {
     const fetch = useAuthenticatedFetch();
+    const location = useLocation();
+    const DEFAULT_PAGE_SIZE = 25;
     const [bookings, setBookings] = useState<Booking[]>([]);
     const [loading, setLoading] = useState(true);
     const [selectedTab, setSelectedTab] = useState(0);
@@ -247,6 +261,10 @@ export default function Bookings() {
     const [selectedType, setSelectedType] = useState('all');
     const [selectedStatus, setSelectedStatus] = useState('all');
     const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+    const [currentPage, setCurrentPage] = useState(1);
+    const [pageSize] = useState(DEFAULT_PAGE_SIZE);
+    const [totalCount, setTotalCount] = useState(0);
+    const [hasMorePages, setHasMorePages] = useState(false);
     const [serviceOptions, setServiceOptions] = useState<FilterOption[]>([{ label: 'All services', value: 'all' }]);
     const [manualBookingOpen, setManualBookingOpen] = useState(false);
     const [manualBookingLoadingOptions, setManualBookingLoadingOptions] = useState(false);
@@ -255,6 +273,7 @@ export default function Bookings() {
     const [manualForm, setManualForm] = useState<ManualBookingFormState>(DEFAULT_MANUAL_FORM);
     const [manualProductCatalog, setManualProductCatalog] = useState<ManualProductCatalog[]>([]);
     const [manualLocationOptions, setManualLocationOptions] = useState<Array<{ label: string; value: string }>>([]);
+    const didInitializePagination = useRef(false);
 
     const tabs = [
         { id: 'bookings', content: 'Bookings', panelID: 'bookings-content' },
@@ -263,6 +282,48 @@ export default function Bookings() {
         { id: 'abandoned', content: 'Abandoned', panelID: 'abandoned-content' },
         { id: 'calendar', content: 'Bookings calendar', panelID: 'calendar-content' },
     ];
+
+    useEffect(() => {
+        const params = new URLSearchParams(location.search);
+        const status = params.get('status');
+        const datePreset = params.get('date_preset');
+        const productId = params.get('product_id');
+        const fulfillmentType = params.get('fulfillment_type');
+        const sort = params.get('sort_direction');
+        const search = params.get('search');
+        const page = params.get('page');
+
+        if (status === 'CONFIRMED') setSelectedTab(0);
+        if (status === 'CANCELLED') setSelectedTab(1);
+        if (status === 'HOLD') setSelectedTab(2);
+        if (status === 'EXPIRED') setSelectedTab(3);
+
+        if (status && status !== 'all') {
+            setSelectedStatus(status);
+        }
+        if (datePreset === 'upcoming') {
+            setUpcomingOnly(true);
+        }
+        if (productId && productId !== 'all') {
+            setSelectedService(productId);
+        }
+        if (fulfillmentType && fulfillmentType !== 'all') {
+            setSelectedType(fulfillmentType);
+        }
+        if (sort === 'asc' || sort === 'desc') {
+            setSortDirection(sort);
+        }
+        if (search) {
+            setSearchQuery(search);
+            setDebouncedSearch(search);
+        }
+        if (page) {
+            const parsedPage = Number(page);
+            if (Number.isInteger(parsedPage) && parsedPage > 0) {
+                setCurrentPage(parsedPage);
+            }
+        }
+    }, [location.search]);
 
     const loadFilterOptions = useCallback(async () => {
         try {
@@ -451,7 +512,7 @@ export default function Bookings() {
         }
     }, [fetch]);
 
-    const loadBookings = useCallback(async (search: string) => {
+    const loadBookings = useCallback(async (search: string, page: number) => {
         setLoading(true);
         try {
             const params = buildBookingsQueryParams({
@@ -462,6 +523,8 @@ export default function Bookings() {
                 selectedType,
                 sortDirection,
                 search,
+                limit: pageSize,
+                offset: (page - 1) * pageSize,
             });
 
             const queryString = params.toString();
@@ -472,11 +535,17 @@ export default function Bookings() {
             }
 
             const data = (await response.json()) as BookingsResponse;
-            setBookings(Array.isArray(data.bookings) ? data.bookings : []);
+            const nextBookings = Array.isArray(data.bookings) ? data.bookings : [];
+            setBookings(nextBookings);
+            const total = Number(data.pagination?.total ?? 0);
+            setTotalCount(Number.isFinite(total) && total > 0 ? total : nextBookings.length);
+            setHasMorePages(Boolean(data.pagination?.has_more));
             setError(null);
         } catch (loadError: unknown) {
             console.error('Failed to load bookings', loadError);
             setBookings([]);
+            setTotalCount(0);
+            setHasMorePages(false);
             if (loadError instanceof Error) {
                 setError(loadError.message);
             } else {
@@ -485,7 +554,7 @@ export default function Bookings() {
         } finally {
             setLoading(false);
         }
-    }, [fetch, selectedTab, selectedStatus, upcomingOnly, selectedService, selectedType, sortDirection]);
+    }, [fetch, pageSize, selectedTab, selectedStatus, upcomingOnly, selectedService, selectedType, sortDirection]);
 
     useEffect(() => {
         const timer = setTimeout(() => setDebouncedSearch(searchQuery), 350);
@@ -493,12 +562,20 @@ export default function Bookings() {
     }, [searchQuery]);
 
     useEffect(() => {
+        if (!didInitializePagination.current) {
+            didInitializePagination.current = true;
+            return;
+        }
+        setCurrentPage(1);
+    }, [debouncedSearch, selectedTab, selectedStatus, upcomingOnly, selectedService, selectedType, sortDirection]);
+
+    useEffect(() => {
         void loadFilterOptions();
     }, [loadFilterOptions]);
 
     useEffect(() => {
-        void loadBookings(debouncedSearch);
-    }, [debouncedSearch, loadBookings]);
+        void loadBookings(debouncedSearch, currentPage);
+    }, [currentPage, debouncedSearch, loadBookings]);
 
     useEffect(() => {
         if (!manualBookingOpen) {
@@ -627,7 +704,7 @@ export default function Bookings() {
                 variantId: current.variantId,
             }));
             showShopifyToast(`Manual booking created (${responseBody.booking_token?.slice(0, 8) ?? 'token'})`);
-            await loadBookings(debouncedSearch);
+            await loadBookings(debouncedSearch, 1);
         } catch (submitError) {
             const message = submitError instanceof Error ? submitError.message : 'Failed to create booking';
             setManualBookingError(message);
@@ -647,7 +724,7 @@ export default function Bookings() {
                 return false;
             }
 
-            await loadBookings(debouncedSearch);
+            await loadBookings(debouncedSearch, currentPage);
 
             if (responseBody.fulfillment?.success === false) {
                 const detail = responseBody.fulfillment.message?.trim();
@@ -664,6 +741,26 @@ export default function Bookings() {
             return true;
         } catch (completeError) {
             const message = completeError instanceof Error ? completeError.message : 'Failed to complete booking';
+            showShopifyToast(message, true);
+            return false;
+        }
+    };
+
+    const handleCancelBooking = async (token: string): Promise<boolean> => {
+        try {
+            const response = await fetch(`/bookings/${token}/cancel`, { method: 'POST' });
+            const responseBody = (await response.json().catch(() => null)) as BookingCancelResponse | null;
+            if (!response.ok || !responseBody?.ok) {
+                const message = responseBody?.error || `Failed to cancel booking (${response.status})`;
+                showShopifyToast(message, true);
+                return false;
+            }
+
+            await loadBookings(debouncedSearch, currentPage);
+            showShopifyToast('Booking cancelled.');
+            return true;
+        } catch (cancelError) {
+            const message = cancelError instanceof Error ? cancelError.message : 'Failed to cancel booking';
             showShopifyToast(message, true);
             return false;
         }
@@ -829,8 +926,34 @@ export default function Bookings() {
                                                     key={booking.booking_token}
                                                     booking={booking}
                                                     onMarkComplete={handleMarkComplete}
+                                                    onCancel={handleCancelBooking}
                                                 />
                                             ))}
+                                            <Box padding="400">
+                                                <InlineStack align="space-between" blockAlign="center">
+                                                    <Text as="span" tone="subdued">
+                                                        Showing {(currentPage - 1) * pageSize + 1}
+                                                        {' - '}
+                                                        {Math.min(currentPage * pageSize, totalCount)}
+                                                        {' of '}
+                                                        {totalCount}
+                                                    </Text>
+                                                    <InlineStack gap="200">
+                                                        <Button
+                                                            onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                                                            disabled={currentPage <= 1}
+                                                        >
+                                                            Previous
+                                                        </Button>
+                                                        <Button
+                                                            onClick={() => setCurrentPage((prev) => prev + 1)}
+                                                            disabled={!hasMorePages}
+                                                        >
+                                                            Next
+                                                        </Button>
+                                                    </InlineStack>
+                                                </InlineStack>
+                                            </Box>
                                         </div>
                                     )}
                                 </>

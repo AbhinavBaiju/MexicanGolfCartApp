@@ -22,6 +22,8 @@ export interface BookingsQueryParamsInput {
     selectedType: string;
     sortDirection: 'asc' | 'desc';
     search: string;
+    limit?: number;
+    offset?: number;
 }
 
 export function buildBookingsQueryParams(input: BookingsQueryParamsInput): URLSearchParams {
@@ -57,5 +59,11 @@ export function buildBookingsQueryParams(input: BookingsQueryParamsInput): URLSe
     }
 
     params.set('sort_direction', input.sortDirection);
+    if (typeof input.limit === 'number' && Number.isInteger(input.limit) && input.limit > 0) {
+        params.set('limit', String(input.limit));
+    }
+    if (typeof input.offset === 'number' && Number.isInteger(input.offset) && input.offset >= 0) {
+        params.set('offset', String(input.offset));
+    }
     return params;
 }

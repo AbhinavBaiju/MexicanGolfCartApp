@@ -3,6 +3,7 @@ import { SessionTokenPayload, verifySessionToken } from './auth';
 import { checkRateLimit } from './rateLimit';
 import { datePartsToIndex, listDateStrings, parseDateParts, getTodayInTimeZone } from './date';
 import { DEFAULT_STORE_TIMEZONE, normalizeStoreTimezone, SHOPIFY_ADMIN_API_VERSION } from './config';
+import { cancelBooking } from './bookingService';
 
 interface AdminAuthContext {
     shopId: number;
@@ -116,6 +117,13 @@ interface BookingQuerySchema {
     hasDeliveryAddress: boolean;
     hasSignedAgreements: boolean;
 }
+
+/**
+ * Booking status transitions (admin-facing operations):
+ * HOLD -> CONFIRMED | RELEASED | EXPIRED | INVALID | CANCELLED
+ * CONFIRMED -> RELEASED | CANCELLED
+ * RELEASED, EXPIRED, INVALID, CANCELLED are terminal.
+ */
 
 export async function handleAdminRequest(request: Request, env: Env): Promise<Response> {
     const rate = checkRateLimit(rateLimitKey(request, 'admin'), 120, 60_000);
@@ -241,6 +249,12 @@ export async function handleAdminRequest(request: Request, env: Env): Promise<Re
     if (segments.length === 3 && segments[0] === 'bookings' && segments[2] === 'complete') {
         if (method === 'POST') {
             return handleBookingComplete(env, auth, segments[1]);
+        }
+    }
+
+    if (segments.length === 3 && segments[0] === 'bookings' && segments[2] === 'cancel') {
+        if (method === 'POST') {
+            return handleBookingCancel(env, auth, segments[1]);
         }
     }
 
@@ -828,7 +842,6 @@ async function handleBookingsPost(request: Request, env: Env, auth: AdminAuthCon
 
 async function handleBookingsGet(request: Request, env: Env, auth: AdminAuthContext): Promise<Response> {
     const shopId = auth.shopId;
-    // NOTE: This endpoint intentionally returns a flattened list for the admin UI.
     const url = new URL(request.url);
     const status = url.searchParams.get('status');
     const startDate = url.searchParams.get('start_date');
@@ -841,8 +854,10 @@ async function handleBookingsGet(request: Request, env: Env, auth: AdminAuthCont
     const sortDirectionParam = (url.searchParams.get('sort_direction') || 'desc').toLowerCase();
     const productIdParam = url.searchParams.get('product_id');
     const productId = productIdParam ? parsePositiveInt(productIdParam) : null;
+    const limit = clampInt(url.searchParams.get('limit'), 25, 1, 200);
+    const offset = clampInt(url.searchParams.get('offset'), 0, 0, 50_000);
 
-    const validStatuses = new Set(['HOLD', 'CONFIRMED', 'RELEASED', 'EXPIRED', 'INVALID', 'CANCELLED', 'WAITLIST']);
+    const validStatuses = new Set(['HOLD', 'CONFIRMED', 'RELEASED', 'EXPIRED', 'INVALID', 'CANCELLED']);
     const validDatePresets = new Set(['upcoming']);
     const validFulfillmentTypes = new Set(['Pick Up', 'Delivery']);
     const validUpsellOptions = new Set(['with_upsell', 'without_upsell']);
@@ -889,56 +904,55 @@ async function handleBookingsGet(request: Request, env: Env, auth: AdminAuthCont
         schema.hasFulfillmentType ? 'b.fulfillment_type' : 'NULL as fulfillment_type',
         schema.hasDeliveryAddress ? 'b.delivery_address' : 'NULL as delivery_address',
         schema.hasSignedAgreements ? 's.id as signed_agreement_id' : 'NULL as signed_agreement_id',
+        'COALESCE(SUM(bi.qty), 0) as total_qty',
         'COUNT(DISTINCT bi.product_id) as service_count',
         'GROUP_CONCAT(DISTINCT bi.product_id) as service_product_ids',
         'CASE WHEN COUNT(DISTINCT bi.product_id) > 1 THEN 1 ELSE 0 END as has_upsell',
     ];
 
-    let sql =
-        `SELECT ${selectColumns.join(', ')}
-         FROM bookings b
+    let fromSql =
+        `FROM bookings b
          LEFT JOIN booking_items bi ON bi.booking_id = b.id`;
 
     if (schema.hasSignedAgreements) {
-        sql += `
+        fromSql += `
          LEFT JOIN signed_agreements s
              ON s.order_id = b.order_id AND s.shop_domain = ?`;
     }
 
-    sql += `
-         WHERE b.shop_id = ?`;
+    let whereSql = 'WHERE b.shop_id = ?';
 
     const bindings: (string | number)[] = schema.hasSignedAgreements ? [auth.shopDomain, shopId] : [shopId];
     if (status) {
-        sql += ' AND b.status = ?';
+        whereSql += ' AND b.status = ?';
         bindings.push(status);
     }
     if (startDate) {
-        sql += ' AND b.start_date >= ?';
+        whereSql += ' AND b.start_date >= ?';
         bindings.push(startDate);
     }
     if (endDate) {
-        sql += ' AND b.end_date <= ?';
+        whereSql += ' AND b.end_date <= ?';
         bindings.push(endDate);
     }
     if (datePreset === 'upcoming') {
-        sql += ' AND b.start_date >= ?';
+        whereSql += ' AND b.start_date >= ?';
         bindings.push(getTodayInTimeZone(auth.shopTimezone));
     }
     if (locationCode && locationCode.trim().length > 0) {
-        sql += ' AND b.location_code = ?';
+        whereSql += ' AND b.location_code = ?';
         bindings.push(locationCode.trim());
     }
     if (fulfillmentType) {
-        sql += ' AND b.fulfillment_type = ?';
+        whereSql += ' AND b.fulfillment_type = ?';
         bindings.push(fulfillmentType);
     }
     if (productId) {
-        sql += ' AND EXISTS (SELECT 1 FROM booking_items bi_filter WHERE bi_filter.booking_id = b.id AND bi_filter.product_id = ?)';
+        whereSql += ' AND EXISTS (SELECT 1 FROM booking_items bi_filter WHERE bi_filter.booking_id = b.id AND bi_filter.product_id = ?)';
         bindings.push(productId);
     }
     if (upsell === 'with_upsell') {
-        sql += ` AND EXISTS (
+        whereSql += ` AND EXISTS (
             SELECT 1
             FROM booking_items bi_upsell
             WHERE bi_upsell.booking_id = b.id
@@ -947,7 +961,7 @@ async function handleBookingsGet(request: Request, env: Env, auth: AdminAuthCont
         )`;
     }
     if (upsell === 'without_upsell') {
-        sql += ` AND NOT EXISTS (
+        whereSql += ` AND NOT EXISTS (
             SELECT 1
             FROM booking_items bi_upsell
             WHERE bi_upsell.booking_id = b.id
@@ -967,7 +981,7 @@ async function handleBookingsGet(request: Request, env: Env, auth: AdminAuthCont
             searchClauses.push('b.customer_email LIKE ?');
             searchBindings.push(term);
         }
-        sql += ` AND (${searchClauses.join(' OR ')})`;
+        whereSql += ` AND (${searchClauses.join(' OR ')})`;
         bindings.push(...searchBindings);
     }
 
@@ -1005,11 +1019,32 @@ async function handleBookingsGet(request: Request, env: Env, auth: AdminAuthCont
         groupByColumns.push('s.id');
     }
 
-    sql += ` GROUP BY ${groupByColumns.join(', ')}`;
-    sql += ` ORDER BY b.start_date ${sortDirection}, b.created_at DESC`;
+    const groupedBaseSql = `${fromSql}
+        ${whereSql}
+        GROUP BY ${groupByColumns.join(', ')}`;
+    const listSql = `SELECT ${selectColumns.join(', ')}
+        ${groupedBaseSql}
+        ORDER BY b.start_date ${sortDirection}, b.created_at DESC
+        LIMIT ? OFFSET ?`;
+    const countSql = `SELECT COUNT(*) as total FROM (
+            SELECT b.id
+            ${groupedBaseSql}
+        ) AS filtered`;
 
-    const rows = await env.DB.prepare(sql).bind(...bindings).all();
-    return Response.json({ ok: true, bookings: rows.results ?? [] });
+    const countRow = await env.DB.prepare(countSql).bind(...bindings).first();
+    const total = countRow && isRecord(countRow) ? toNumber(countRow.total) ?? 0 : 0;
+    const rows = await env.DB.prepare(listSql).bind(...bindings, limit, offset).all();
+
+    return Response.json({
+        ok: true,
+        bookings: rows.results ?? [],
+        pagination: {
+            total,
+            limit,
+            offset,
+            has_more: offset + limit < total,
+        },
+    });
 }
 
 async function handleBookingGet(env: Env, shopId: number, bookingToken: string): Promise<Response> {
@@ -1188,6 +1223,9 @@ async function handleBookingComplete(env: Env, auth: AdminAuthContext, bookingTo
     if (!booking) {
         return jsonError('Booking not found', 404);
     }
+    if (booking.status !== 'HOLD' && booking.status !== 'CONFIRMED') {
+        return jsonError(`Booking cannot be completed from status ${String(booking.status)}`, 409);
+    }
     const orderId = booking.order_id as number;
 
     let fulfillmentResult = { success: false, message: 'No Order ID' };
@@ -1196,11 +1234,48 @@ async function handleBookingComplete(env: Env, auth: AdminAuthContext, bookingTo
         fulfillmentResult = await fulfillShopifyOrder(env, auth, orderId);
     }
 
-    await env.DB.prepare(
-        `UPDATE bookings SET status = 'RELEASED', updated_at = datetime('now') WHERE id = ?`
+    const updateResult = await env.DB.prepare(
+        `UPDATE bookings
+         SET status = 'RELEASED', updated_at = datetime('now')
+         WHERE id = ? AND status IN ('HOLD', 'CONFIRMED')`
     ).bind(booking.id).run();
+    if ((updateResult.meta?.changes ?? 0) !== 1) {
+        return jsonError('Booking completion conflict', 409);
+    }
 
     return Response.json({ ok: true, fulfillment: fulfillmentResult });
+}
+
+async function handleBookingCancel(env: Env, auth: AdminAuthContext, bookingToken: string): Promise<Response> {
+    const booking = await env.DB.prepare(
+        `SELECT id, status FROM bookings WHERE shop_id = ? AND booking_token = ?`
+    ).bind(auth.shopId, bookingToken).first();
+
+    if (!booking || !isRecord(booking) || typeof booking.id !== 'string') {
+        return jsonError('Booking not found', 404);
+    }
+
+    try {
+        const result = await cancelBooking(env.DB, booking.id);
+        if (!result.ok && result.error === 'NOT_CANCELLABLE') {
+            return jsonError(
+                `Booking cannot be cancelled from status ${result.previousStatus ?? String(booking.status)}`,
+                409
+            );
+        }
+        if (!result.ok && result.error === 'NOT_FOUND') {
+            return jsonError('Booking not found', 404);
+        }
+
+        return Response.json({
+            ok: true,
+            status: 'CANCELLED',
+            previous_status: result.previousStatus ?? booking.status,
+        });
+    } catch (e) {
+        console.error('Booking cancellation failed', e);
+        return jsonError('Failed to cancel booking', 500);
+    }
 }
 
 async function fulfillShopifyOrder(env: Env, auth: AdminAuthContext, orderId: number): Promise<{ success: boolean; message: string }> {
@@ -1261,7 +1336,7 @@ async function handleShopifyProductsGet(env: Env, auth: AdminAuthContext): Promi
 
     const query = `
     {
-      products(first: 50, sortKey: TITLE) {
+      products(first: 250, sortKey: TITLE) {
         edges {
           node {
             id
@@ -1274,7 +1349,7 @@ async function handleShopifyProductsGet(env: Env, auth: AdminAuthContext): Promi
                 }
               }
             }
-            variants(first: 20) {
+            variants(first: 50) {
               edges {
                 node {
                   id
@@ -2175,6 +2250,22 @@ export async function __testHandleBookingsPost(
     auth: TestAdminAuthInput
 ): Promise<Response> {
     return handleBookingsPost(request, env, buildTestAdminAuthContext(auth));
+}
+
+export async function __testHandleBookingComplete(
+    env: Env,
+    auth: TestAdminAuthInput,
+    bookingToken: string
+): Promise<Response> {
+    return handleBookingComplete(env, buildTestAdminAuthContext(auth), bookingToken);
+}
+
+export async function __testHandleBookingCancel(
+    env: Env,
+    auth: TestAdminAuthInput,
+    bookingToken: string
+): Promise<Response> {
+    return handleBookingCancel(env, buildTestAdminAuthContext(auth), bookingToken);
 }
 
 export function __resetAdminSchemaCache(): void {

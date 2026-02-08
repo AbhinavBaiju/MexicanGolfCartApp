@@ -1,31 +1,16 @@
-import { Card, BlockStack, Text, InlineGrid, Box, Icon } from '@shopify/polaris';
-import { ArrowUpIcon } from '@shopify/polaris-icons';
+import { Card, BlockStack, Text, InlineGrid, Box } from '@shopify/polaris';
 
 interface StatProps {
     title: string;
     value: string;
-    percentage: string;
-    trend?: 'up' | 'down';
 }
 
-function StatItem({ title, value, percentage, trend = 'up' }: StatProps) {
+function StatItem({ title, value }: StatProps) {
     return (
         <Box>
             <BlockStack gap="100">
                 <Text as="h3" variant="headingSm" fontWeight="medium">{title}</Text>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Text as="p" variant="heading2xl" fontWeight="bold">{value}</Text>
-                    <div style={{
-                        color: trend === 'up' ? '#1a7f37' : '#b22d2d', // Success vs Critical colors
-                        display: 'flex',
-                        alignItems: 'center',
-                        fontSize: '13px',
-                        fontWeight: '600'
-                    }}>
-                        <Icon source={ArrowUpIcon} tone={trend === 'up' ? 'success' : 'critical'} />
-                        {percentage}
-                    </div>
-                </div>
+                <Text as="p" variant="heading2xl" fontWeight="bold">{value}</Text>
             </BlockStack>
         </Box>
     );
@@ -49,9 +34,9 @@ export function DashboardStats({ stats }: DashboardStatsProps) {
         <Card>
             <Box padding="400">
                 <InlineGrid columns={3} gap="400">
-                    <StatItem title="Revenue" value={formatCurrency(stats.revenue)} percentage="0%" />
-                    <StatItem title="Bookings" value={stats.bookingsCount.toString()} percentage="0%" />
-                    <StatItem title="Cancelled bookings" value={stats.cancelledCount.toString()} percentage="0%" />
+                    <StatItem title="Revenue" value={formatCurrency(stats.revenue)} />
+                    <StatItem title="Bookings" value={stats.bookingsCount.toString()} />
+                    <StatItem title="Cancelled bookings" value={stats.cancelledCount.toString()} />
                 </InlineGrid>
             </Box>
         </Card>

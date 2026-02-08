@@ -16,6 +16,19 @@ function createBooking(startDate: string, endDate: string): Booking {
     };
 }
 
+function createCancelledBooking(startDate: string, endDate: string): Booking {
+    return {
+        booking_token: `cancelled-${startDate}-${endDate}`,
+        status: 'CANCELLED',
+        location_code: 'PLAYA',
+        start_date: startDate,
+        end_date: endDate,
+        order_id: 456,
+        invalid_reason: null,
+        created_at: '2026-02-01T00:00:00Z',
+    };
+}
+
 describe('BookingsCalendar range logic', () => {
     it('counts bookings across all days in an inclusive range', () => {
         const ranges = buildBookingRanges([
@@ -39,5 +52,13 @@ describe('BookingsCalendar range logic', () => {
         expect(countBookingsForMonth(ranges, 2026, 1)).toBe(2);
         // 2026-03 should have no overlaps.
         expect(countBookingsForMonth(ranges, 2026, 2)).toBe(0);
+    });
+
+    it('ignores non-active booking statuses in calendar counts', () => {
+        const ranges = buildBookingRanges([
+            createBooking('2026-02-10', '2026-02-10'),
+            createCancelledBooking('2026-02-10', '2026-02-10'),
+        ]);
+        expect(countBookingsForDate(ranges, '2026-02-10')).toBe(1);
     });
 });

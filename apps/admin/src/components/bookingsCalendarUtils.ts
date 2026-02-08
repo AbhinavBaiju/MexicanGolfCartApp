@@ -8,7 +8,11 @@ export interface BookingRange {
 
 export function buildBookingRanges(bookings: Booking[]): BookingRange[] {
     const ranges: BookingRange[] = [];
+    const activeStatuses = new Set(['HOLD', 'CONFIRMED']);
     for (const booking of bookings) {
+        if (!activeStatuses.has(String(booking.status || ''))) {
+            continue;
+        }
         const start = toDateIndex(booking.start_date);
         const end = toDateIndex(booking.end_date);
         if (start === null || end === null || start > end) {

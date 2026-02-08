@@ -25,6 +25,11 @@ export interface MockDbController {
     calls: MockDbCall[];
 }
 
+export interface InspectablePreparedStatement extends D1PreparedStatement {
+    __sql: string;
+    __getBindings: () => unknown[];
+}
+
 function matchesRule(rule: MockDbRule, sql: string): boolean {
     if (typeof rule.match === 'string') {
         return sql.includes(rule.match);
@@ -47,7 +52,9 @@ export function createMockDbController(options: MockDbOptions): MockDbController
         prepare(sql: string): D1PreparedStatement {
             let bindings: unknown[] = [];
 
-            const statement: D1PreparedStatement = {
+            const statement: InspectablePreparedStatement = {
+                __sql: sql,
+                __getBindings: () => bindings,
                 bind(...values: unknown[]): D1PreparedStatement {
                     bindings = values;
                     return statement;

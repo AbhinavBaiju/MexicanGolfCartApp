@@ -2136,3 +2136,49 @@ async function getBookingQuerySchema(db: D1Database): Promise<BookingQuerySchema
 
     return bookingSchemaCache;
 }
+
+interface TestAdminAuthInput {
+    shopId: number;
+    shopDomain: string;
+    shopTimezone: string;
+}
+
+function buildTestAdminAuthContext(input: TestAdminAuthInput): AdminAuthContext {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const payload: SessionTokenPayload = {
+        iss: `https://${input.shopDomain}/admin`,
+        dest: `https://${input.shopDomain}`,
+        aud: 'test-api-key',
+        exp: nowSeconds + 300,
+    };
+
+    return {
+        shopId: input.shopId,
+        shopDomain: input.shopDomain,
+        shopTimezone: input.shopTimezone,
+        payload,
+        sessionToken: 'test-session-token',
+    };
+}
+
+export async function __testHandleBookingsGet(
+    request: Request,
+    env: Env,
+    auth: TestAdminAuthInput
+): Promise<Response> {
+    return handleBookingsGet(request, env, buildTestAdminAuthContext(auth));
+}
+
+export async function __testHandleBookingsPost(
+    request: Request,
+    env: Env,
+    auth: TestAdminAuthInput
+): Promise<Response> {
+    return handleBookingsPost(request, env, buildTestAdminAuthContext(auth));
+}
+
+export function __resetAdminSchemaCache(): void {
+    tableExistsCache.clear();
+    tableColumnsCache.clear();
+    bookingSchemaCache = null;
+}

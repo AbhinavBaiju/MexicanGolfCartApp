@@ -10,6 +10,7 @@ Manual test checklist and automated test recommendations derived from the audit 
 - M4 (Dashboard polishing) is implemented.
 - M5 (Shopify Remix cleanup) is implemented.
 - M6 (Security & proxy hardening) is implemented.
+- M7 (Testing & regression guardrails) is implemented.
 
 Validation commands executed after M2:
 - `npx tsc -p worker/tsconfig.json` (pass)
@@ -58,6 +59,15 @@ Validation commands executed after M6 implementation (2026-02-07):
 - `npm --workspace apps/admin run build` (pass)
 
 M6 verification status: **implemented and validated** (no M1-M5 regression found in automated reruns).
+
+Validation commands executed after M7 implementation (2026-02-08):
+- `npx tsc -p worker/tsconfig.json` (pass)
+- `npm --workspace worker run test` (pass: 19 passed, 0 failed)
+- `npm --workspace apps/admin run test` (pass: 10 passed, 0 failed)
+- `npm --workspace apps/admin run lint` (pass with the same pre-existing warning in `apps/admin/src/pages/Agreement.tsx:353`)
+- `npm --workspace apps/admin run build` (pass)
+
+M7 verification status: **implemented and validated** (no M1-M6 regression found in automated reruns).
 
 ---
 
@@ -145,11 +155,13 @@ Organized by page/area. Each test case references the issue it validates.
 
 Current test files found:
 - [worker/tests/admin.test.ts](worker/tests/admin.test.ts) — Admin endpoint tests
+- [worker/tests/bookings-filters.test.ts](worker/tests/bookings-filters.test.ts) — Admin bookings filter/status/timezone query tests
+- [worker/tests/capacity-conflicts.test.ts](worker/tests/capacity-conflicts.test.ts) — hold/manual-booking atomic conflict tests
 - [worker/tests/date.test.ts](worker/tests/date.test.ts) — Date utility tests
 - [worker/tests/proxy-auth.test.ts](worker/tests/proxy-auth.test.ts) — Proxy signature enforcement mode tests
-- [worker/tests/unit/](worker/tests/unit/) — Unit tests directory
-- [worker/tests/integration/](worker/tests/integration/) — Integration tests directory
+- [worker/tests/webhook-idempotency.test.ts](worker/tests/webhook-idempotency.test.ts) — webhook duplicate-event idempotency test
 - [apps/admin/src/components/__tests__/](apps/admin/src/components/__tests__/) — Component tests directory
+- [apps/admin/src/pages/__tests__/](apps/admin/src/pages/__tests__/) — Page/query helper regression tests
 
 ### 2.2 Priority Test Additions
 
@@ -188,7 +200,7 @@ Current test files found:
 | Gap | Recommendation |
 |---|---|
 | No D1 test doubles | Use Miniflare's D1 support for worker integration tests, or maintain an in-memory SQLite fixture. |
-| No frontend test runner configured | Add Vitest to `apps/admin/` with `@testing-library/react` and `@shopify/polaris-testing`. |
+| D1 mock fidelity is limited | Consider Miniflare D1 or local SQLite-backed integration fixtures for full SQL behavior assertions. |
 | No E2E framework | The `e2e/` directory exists but is empty. Consider Playwright for testing the embedded admin SPA flow. |
 | No CI pipeline visible | Add GitHub Actions workflow: `lint → type-check → unit tests → build → deploy preview`. |
 

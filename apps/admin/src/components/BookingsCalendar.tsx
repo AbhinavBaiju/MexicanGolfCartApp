@@ -2,15 +2,16 @@ import { Card, Text, Box, InlineStack, Button, Badge } from '@shopify/polaris';
 import { ArrowLeftIcon, ArrowRightIcon } from '@shopify/polaris-icons';
 import { useState, useMemo } from 'react';
 import type { Booking } from './BookingCard';
-import { toDateIndex, toLocalYyyyMmDd } from '../utils/date';
+import { toLocalYyyyMmDd } from '../utils/date';
+import {
+    buildBookingRanges,
+    countBookingsForDate,
+    countBookingsForMonth,
+    type BookingRange,
+} from './bookingsCalendarUtils';
 
 interface BookingsCalendarProps {
     bookings?: Booking[];
-}
-
-interface BookingRange {
-    start: number;
-    end: number;
 }
 
 interface CalendarDay {
@@ -27,18 +28,7 @@ export function BookingsCalendar({ bookings = [] }: BookingsCalendarProps) {
     const year = currentDate.getFullYear();
     const month = currentDate.getMonth();
 
-    const bookingRanges = useMemo<BookingRange[]>(() => {
-        const ranges: BookingRange[] = [];
-        for (const booking of bookings) {
-            const start = toDateIndex(booking.start_date);
-            const end = toDateIndex(booking.end_date);
-            if (start === null || end === null || start > end) {
-                continue;
-            }
-            ranges.push({ start, end });
-        }
-        return ranges;
-    }, [bookings]);
+    const bookingRanges = useMemo<BookingRange[]>(() => buildBookingRanges(bookings), [bookings]);
 
     const calendarData = useMemo<CalendarDay[]>(() => {
         const days: Array<{ day: number; month: 'prev' | 'curr' | 'next'; date: Date }> = [];
@@ -68,11 +58,7 @@ export function BookingsCalendar({ bookings = [] }: BookingsCalendarProps) {
 
         return days.map((dayCell) => {
             const dayKey = toLocalYyyyMmDd(dayCell.date);
-            const dayIndex = toDateIndex(dayKey);
-            const count =
-                dayIndex === null
-                    ? 0
-                    : bookingRanges.filter((range) => range.start <= dayIndex && range.end >= dayIndex).length;
+            const count = countBookingsForDate(bookingRanges, dayKey);
 
             return { ...dayCell, count };
         });
@@ -86,15 +72,10 @@ export function BookingsCalendar({ bookings = [] }: BookingsCalendarProps) {
         setCurrentDate(new Date(year, month + 1, 1));
     };
 
-    const currentMonthBookings = useMemo(() => {
-        const monthStartIndex = toDateIndex(toLocalYyyyMmDd(new Date(year, month, 1)));
-        const monthEndIndex = toDateIndex(toLocalYyyyMmDd(new Date(year, month + 1, 0)));
-        if (monthStartIndex === null || monthEndIndex === null) {
-            return 0;
-        }
-
-        return bookingRanges.filter((range) => range.start <= monthEndIndex && range.end >= monthStartIndex).length;
-    }, [bookingRanges, month, year]);
+    const currentMonthBookings = useMemo(
+        () => countBookingsForMonth(bookingRanges, year, month),
+        [bookingRanges, month, year]
+    );
 
     const today = new Date();
 

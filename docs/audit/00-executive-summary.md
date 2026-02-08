@@ -8,7 +8,7 @@
 
 ## What's Broken (High-Level)
 
-The admin dashboard (`apps/admin/`) is a **standalone Vite+React SPA** served via Cloudflare Pages, embedded inside the Shopify admin iframe. Core booking/dashboard/inventory flows are now implemented through M1-M6, and major UI dead-end stubs have been removed. Security/timezone/API-version hardening has now been implemented in the worker.
+The admin dashboard (`apps/admin/`) is a **standalone Vite+React SPA** served via Cloudflare Pages, embedded inside the Shopify admin iframe. Core booking/dashboard/inventory flows are now implemented through M1-M7 guardrails, and major UI dead-end stubs have been removed. Security/timezone/API-version hardening has now been implemented in the worker, with new regression-test coverage across backend and frontend high-risk paths.
 
 The Shopify Remix app (`apps/shopify/mexican-golf-cart/`) previously contained **default template code** and placeholder route stubs. As of M5, those routes now redirect safely to the real admin SPA paths, and the template "Generate a product" demo behavior has been removed from the embedded app flow.
 
@@ -53,7 +53,7 @@ The Shopify Remix app (`apps/shopify/mexican-golf-cart/`) previously contained *
 
 ### UX Dead Ends
 - **Low:** M1-M5 removed the major dead-ends, including Remix template/placeholder routes (ISS-008/ISS-009).
-- **Low (remaining):** No major UX dead-end stubs remain; primary next work is M7 test coverage depth.
+- **Low (remaining):** No major UX dead-end stubs remain; primary next work is full embedded-browser E2E automation depth.
 
 ---
 
@@ -67,7 +67,7 @@ The application is a **three-part system**:
 
 3. **Shopify Remix App** (`apps/shopify/mexican-golf-cart/`): OAuth entry point and Shopify CLI host. During `shopify app dev`, it serves the Vite admin SPA via the `dev-shopify-admin.sh` script. Legacy Remix `/app/*` routes now redirect to SPA routes to avoid dead-end placeholder UX.
 
-Post-M1 through M6, the admin SPA now has aligned filter/search/export and management behavior across Dashboard/Bookings, and the worker now includes the planned M6 security/timezone/API-version hardening.
+Post-M1 through M7, the admin SPA now has aligned filter/search/export and management behavior across Dashboard/Bookings, the worker includes the planned M6 security/timezone/API-version hardening, and M7 adds automated regression guardrails for booking filters, signature enforcement, conflict behavior, timezone-sensitive querying, and key admin UI logic.
 
 ---
 
@@ -161,5 +161,26 @@ Post-M6 validation re-run (2026-02-07):
 
 - `npx tsc -p worker/tsconfig.json`: **PASS**
 - `npm --workspace worker run test`: **PASS** (11 passed, 0 failed)
+- `npm --workspace apps/admin run lint`: **PASS with warning** (`apps/admin/src/pages/Agreement.tsx:353`, pre-existing `react-hooks/exhaustive-deps`)
+- `npm --workspace apps/admin run build`: **PASS**
+
+Milestone 7 (Testing & Regression Guardrails) has now been implemented (2026-02-08):
+
+- Worker tests expanded to cover:
+  - bookings filter/status handling (`WAITLIST`, invalid status, timezone `date_preset=upcoming` binding)
+  - proxy signature behavior (missing/invalid/valid signature paths)
+  - atomic capacity conflict behavior for `/proxy/hold` and `/admin/bookings`
+  - webhook idempotency duplicate-event behavior
+- Admin test runner added (`Vitest` + Testing Library) with focused regression coverage for:
+  - Bookings query mapping
+  - Dashboard query/service-label mapping
+  - BookingCard manage fetch/date display
+  - BookingsCalendar multi-day span counting
+
+Post-M7 validation re-run (2026-02-08):
+
+- `npx tsc -p worker/tsconfig.json`: **PASS**
+- `npm --workspace worker run test`: **PASS** (19 passed, 0 failed)
+- `npm --workspace apps/admin run test`: **PASS** (10 passed, 0 failed)
 - `npm --workspace apps/admin run lint`: **PASS with warning** (`apps/admin/src/pages/Agreement.tsx:353`, pre-existing `react-hooks/exhaustive-deps`)
 - `npm --workspace apps/admin run build`: **PASS**

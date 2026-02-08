@@ -38,6 +38,30 @@ test('dev mode keeps proxy signature check disabled for compatibility', async ()
     assert.notEqual(response.status, 401);
 });
 
+test('production rejects invalid proxy signature', async () => {
+    const env = createEnv('production');
+    const request = new Request(
+        'https://worker.example/proxy/config?shop=test-shop.myshopify.com&signature=deadbeef'
+    );
+    const response = await handleProxyRequest(request, env);
+
+    assert.equal(response.status, 401);
+});
+
+test('production accepts valid proxy signature and evaluates downstream route logic', async () => {
+    const env = createEnv('production');
+    const baseParams = new URLSearchParams({
+        shop: 'test-shop.myshopify.com',
+    });
+    const signature = await createProxySignature(baseParams, env.SHOPIFY_API_SECRET);
+    baseParams.set('signature', signature);
+
+    const request = new Request(`https://worker.example/proxy/config?${baseParams.toString()}`);
+    const response = await handleProxyRequest(request, env);
+
+    assert.notEqual(response.status, 401);
+});
+
 function createEnv(environment: string): Env {
     return {
         DB: createMockDb(),
@@ -55,6 +79,24 @@ function createMockDb(): D1Database {
         batch: async () => [],
         exec: async () => ({ count: 0, duration: 0 }),
     } as unknown as D1Database;
+}
+
+async function createProxySignature(params: URLSearchParams, secret: string): Promise<string> {
+    const entries = Array.from(params.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+    const message = entries.map(([key, value]) => `${key}=${value}`).join('');
+
+    const encoder = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+        'raw',
+        encoder.encode(secret),
+        { name: 'HMAC', hash: 'SHA-256' },
+        false,
+        ['sign']
+    );
+    const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(message));
+    return Array.from(new Uint8Array(signature))
+        .map((byte) => byte.toString(16).padStart(2, '0'))
+        .join('');
 }
 
 function createMockStatement(): D1PreparedStatement {

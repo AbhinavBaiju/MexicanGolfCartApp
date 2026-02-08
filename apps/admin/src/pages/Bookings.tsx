@@ -22,6 +22,7 @@ import { BookingCard, type Booking } from '../components/BookingCard';
 import { BookingsCalendar } from '../components/BookingsCalendar';
 import { SearchIcon, ExportIcon, ArrowUpIcon, PlusIcon } from '@shopify/polaris-icons';
 import { showShopifyToast } from '../utils/shopifyToast';
+import { buildBookingsQueryParams } from './bookingsQuery';
 
 interface FilterOption {
     label: string;
@@ -216,22 +217,6 @@ function FilterPopover({ options, selectedValue, onSelect }: FilterPopoverProps)
             <ActionList items={items} />
         </Popover>
     );
-}
-
-function getTabStatus(selectedTab: number): string | null {
-    if (selectedTab === 0) {
-        return 'CONFIRMED';
-    }
-    if (selectedTab === 1) {
-        return 'CANCELLED';
-    }
-    if (selectedTab === 2) {
-        return 'HOLD';
-    }
-    if (selectedTab === 3) {
-        return 'EXPIRED';
-    }
-    return null;
 }
 
 function getVariantChoicesForProduct(
@@ -469,38 +454,15 @@ export default function Bookings() {
     const loadBookings = useCallback(async (search: string) => {
         setLoading(true);
         try {
-            const params = new URLSearchParams();
-            const isCalendarView = selectedTab === 4;
-
-            if (!isCalendarView) {
-                const tabStatus = getTabStatus(selectedTab);
-                if (tabStatus) {
-                    params.set('status', tabStatus);
-                }
-
-                if (selectedStatus !== 'all') {
-                    params.set('status', selectedStatus);
-                }
-
-                if (upcomingOnly) {
-                    params.set('date_preset', 'upcoming');
-                }
-
-                if (selectedService !== 'all') {
-                    params.set('product_id', selectedService);
-                }
-
-                if (selectedType !== 'all') {
-                    params.set('fulfillment_type', selectedType);
-                }
-
-                const trimmedSearch = search.trim();
-                if (trimmedSearch.length > 0) {
-                    params.set('search', trimmedSearch);
-                }
-            }
-
-            params.set('sort_direction', sortDirection);
+            const params = buildBookingsQueryParams({
+                selectedTab,
+                selectedStatus,
+                upcomingOnly,
+                selectedService,
+                selectedType,
+                sortDirection,
+                search,
+            });
 
             const queryString = params.toString();
             const response = await fetch(queryString ? `/bookings?${queryString}` : '/bookings');

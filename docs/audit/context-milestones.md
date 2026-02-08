@@ -13,12 +13,15 @@
 - Milestone implementation handoff log: [docs/audit/11-m4-implementation-log.md](docs/audit/11-m4-implementation-log.md)
 - Milestone implementation handoff log: [docs/audit/14-m5-implementation-log.md](docs/audit/14-m5-implementation-log.md)
 - Milestone implementation handoff log: [docs/audit/17-m6-implementation-log.md](docs/audit/17-m6-implementation-log.md)
+- Milestone handoff context: [docs/audit/18-m6-handoff-context.md](docs/audit/18-m6-handoff-context.md)
+- Next chat prompt (M7): [docs/audit/19-next-chat-m7-handoff-prompt.md](docs/audit/19-next-chat-m7-handoff-prompt.md)
+- Milestone implementation handoff log: [docs/audit/20-m7-implementation-log.md](docs/audit/20-m7-implementation-log.md)
 
 ## System Snapshot (from the docs)
 - Stack: Vite+React+Polaris admin SPA (Cloudflare Pages), Cloudflare Worker + D1 backend, Shopify Remix shell for OAuth/tunnel, App Bridge v4 for auth.
 - Truth source: Worker/D1; storefront proxy handles holds; admin SPA uses `/admin/*` JWT endpoints.
 - Biggest broken UX (historical): Bookings page filters/export/manual booking, stub buttons (Manage, FAQ, New service), Remix placeholder routes.
-- Remaining high-priority work: Regression test expansion and automation hardening (M7).
+- Remaining high-priority work: Full browser-level embedded E2E automation (Playwright/Shopify iframe path).
 - Security posture: M6 removed wildcard admin CORS, enabled proxy HMAC verification in production for all `/proxy/*` routes, and moved date rules to per-shop timezone. `SHOPIFY_API_SECRET` still must be managed as a Cloudflare secret (not in `wrangler.toml`).
 
 ## Milestones for Implementation
@@ -68,6 +71,7 @@ M7 – Testing & Regression Guardrails
 - Backend: add booking filter coverage, manual booking creation, proxy HMAC, inventory conflict tests (see P0 list in [docs/audit/05-test-and-verification-plan.md](docs/audit/05-test-and-verification-plan.md)).
 - Frontend: Vitest + Testing Library for filter buttons wired, Manage action, date formatting, calendar spans, toast feedback.
 - E2E: Playwright flow for hold→confirm→admin visibility, agreement signing, embedded iframe auth.
+Status: Implemented on 2026-02-08 with backend/frontend guardrails and practical integration paths; browser-level embedded Playwright flow remains as follow-up. See [docs/audit/20-m7-implementation-log.md](docs/audit/20-m7-implementation-log.md).
 
 ## Quick Pointers to Code/Endpoints
 - Functional filters reference: Dashboard implementation in [apps/admin/src/pages/Dashboard.tsx](apps/admin/src/pages/Dashboard.tsx).

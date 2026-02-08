@@ -22,6 +22,7 @@ import { useAuthenticatedFetch } from '../api';
 import type { Booking } from '../components/BookingCard';
 import { BookingCard } from '../components/BookingCard';
 import { showShopifyToast } from '../utils/shopifyToast';
+import { buildDashboardBookingsQueryParams, buildDashboardServiceOptions } from './dashboardQuery';
 
 const DASHBOARD_STYLES = `
     .full-height-card-wrapper {
@@ -289,36 +290,12 @@ export default function Dashboard() {
 
             if (productsRes.ok) {
                 const productsData = (await productsRes.json()) as ProductConfigResponse;
-                const serviceIds = (productsData.products || [])
-                    .map((entry) => toNumber(entry.product_id))
-                    .filter((id) => Number.isInteger(id) && id > 0)
-                    .sort((a, b) => a - b);
-                const shopifyTitleById = new Map<number, string>();
+                let shopifyProducts: ShopifyProductsResponse['products'] = [];
                 if (shopifyProductsRes.ok) {
                     const shopifyProductsData = (await shopifyProductsRes.json()) as ShopifyProductsResponse;
-                    for (const product of shopifyProductsData.products || []) {
-                        const productId = toNumber(product.id);
-                        if (!Number.isInteger(productId) || productId <= 0) {
-                            continue;
-                        }
-                        const title = product.title?.trim();
-                        if (title) {
-                            shopifyTitleById.set(productId, title);
-                        }
-                    }
+                    shopifyProducts = shopifyProductsData.products;
                 }
-
-                const nextServiceOptions = serviceIds
-                    .map((id) => ({
-                        label: shopifyTitleById.get(id) ?? `Service ${id}`,
-                        value: String(id),
-                    }))
-                    .sort((a, b) => a.label.localeCompare(b.label));
-
-                setServiceOptions([
-                    { label: 'All services', value: 'all' },
-                    ...nextServiceOptions,
-                ]);
+                setServiceOptions(buildDashboardServiceOptions(productsData.products, shopifyProducts));
             }
 
             if (locationsRes.ok) {
@@ -358,30 +335,16 @@ export default function Dashboard() {
     const loadFilteredBookings = useCallback(async (search: string) => {
         setLoadingBookings(true);
         try {
-            const params = new URLSearchParams();
-            params.set('sort_direction', sortDirection);
-            if (upcomingOnly) {
-                params.set('date_preset', 'upcoming');
-            }
-            if (selectedService !== 'all') {
-                params.set('product_id', selectedService);
-            }
-            if (selectedLocation !== 'all') {
-                params.set('location_code', selectedLocation);
-            }
-            if (selectedType !== 'all') {
-                params.set('fulfillment_type', selectedType);
-            }
-            if (selectedStatus !== 'all') {
-                params.set('status', selectedStatus);
-            }
-            if (selectedUpsell !== 'all') {
-                params.set('upsell', selectedUpsell);
-            }
-            const trimmedSearch = search.trim();
-            if (trimmedSearch.length > 0) {
-                params.set('search', trimmedSearch);
-            }
+            const params = buildDashboardBookingsQueryParams({
+                sortDirection,
+                upcomingOnly,
+                selectedService,
+                selectedLocation,
+                selectedType,
+                selectedStatus,
+                selectedUpsell,
+                search,
+            });
 
             const response = await fetch(`/bookings?${params.toString()}`);
             if (!response.ok) {
